@@ -78,8 +78,38 @@ def ptb_raw_data(data_path=None):
   vocabulary = len(word_to_id)
   return train_data, valid_data, test_data, vocabulary
 
+def read_indexed_data(filename, max_train_data_size=0, vocab_size=None):
+  data = []
+  with tf.gfile.GFile(filename, "r") as f:
+    line_nr = 0
+    for line in f:
+      tok_ids = [ int(x) for x in line.split() ]
+      if vocab_size:
+        tok_ids = [ tok if tok < vocab_size else 0 for tok in tok_ids ] # 0 = UNK_ID
+      tok_ids.append(2) # EOS
+      data.extend(tok_ids)
+      line_nr += 1
+      if max_train_data_size > 0 and \
+        line_nr >= max_train_data_size:
+        break
+  return data
 
-def ptb_iterator(raw_data, batch_size, num_steps):
+def indexed_data(data_path=None, max_train_data_size=0, vocab_size=None):
+  train_path = os.path.join(data_path, "train/news2015.ids50003.de")
+  valid_path = os.path.join(data_path, "dev/dev.ids50003.de")
+  test_path = os.path.join(data_path, "test15/test15.ids50003.de")
+  
+  train_data = read_indexed_data(train_path, max_train_data_size)
+  valid_data = read_indexed_data(valid_path, vocab_size=vocab_size)
+  test_data = read_indexed_data(test_path, vocab_size=vocab_size)
+  return train_data, valid_data, test_data
+  
+def indexed_data_test(data_path=None, max_test_data_size=0, vocab_size=None):
+  test_path = os.path.join(data_path, "test15/test15.ids50003.de")
+  test_data = read_indexed_data(test_path, max_test_data_size, vocab_size)
+  return test_data  
+
+def ptb_iterator(raw_data, batch_size, num_steps, start_idx=0):
   """Iterate on the raw PTB data.
 
   This generates batch_size pointers into the raw PTB data, and allows
@@ -111,7 +141,7 @@ def ptb_iterator(raw_data, batch_size, num_steps):
   if epoch_size == 0:
     raise ValueError("epoch_size == 0, decrease batch_size or num_steps")
 
-  for i in range(epoch_size):
+  for i in range(start_idx, epoch_size):
     x = data[:, i*num_steps:(i+1)*num_steps]
     y = data[:, i*num_steps+1:(i+1)*num_steps+1]
     yield (x, y)

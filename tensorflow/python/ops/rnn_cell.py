@@ -38,6 +38,7 @@ from tensorflow.python.ops.math_ops import tanh
 
 from tensorflow.python.platform import tf_logging as logging
 
+import logging
 
 class RNNCell(object):
   """Abstract object representing an RNN cell.
@@ -194,7 +195,6 @@ class BasicLSTMCell(RNNCell):
 
       # i = input_gate, j = new_input, f = forget_gate, o = output_gate
       i, j, f, o = array_ops.split(1, 4, concat)
-
       new_c = c * sigmoid(f + self._forget_bias) + sigmoid(i) * tanh(j)
       new_h = tanh(new_c) * sigmoid(o)
 
@@ -569,7 +569,12 @@ class EmbeddingWrapper(RNNCell):
   def state_size(self):
     return self._cell.state_size
 
+  @property
+  def output_size(self):
+    return self._cell.output_size
+
   def __call__(self, inputs, state, scope=None):
+    logging.debug("_call_EmbeddingWrapper")
     """Run the cell on embedded inputs."""
     with vs.variable_scope(scope or type(self).__name__):  # "EmbeddingWrapper"
       with ops.device("/cpu:0"):
@@ -588,6 +593,27 @@ class EmbeddingWrapper(RNNCell):
             embedding, array_ops.reshape(inputs, [-1]))
     return self._cell(embedded, state)
 
+class Embedder(EmbeddingWrapper):
+
+  def __call__(self, inputs, scope=None):
+    logging.debug("_call_EmbeddingWrapper")
+    """Only embeds inputs, does not change any RNN state."""
+    with vs.variable_scope(scope or type(self).__name__):  # "EmbeddingWrapper"
+      with ops.device("/cpu:0"):
+        if self._initializer:
+          initializer = self._initializer
+        elif vs.get_variable_scope().initializer:
+          initializer = vs.get_variable_scope().initializer
+        else:
+          # Default initializer for embeddings should have variance=1.
+          sqrt3 = math.sqrt(3)  # Uniform(-sqrt(3), sqrt(3)) has variance=1.
+          initializer = init_ops.random_uniform_initializer(-sqrt3, sqrt3)
+        embedding = vs.get_variable("embedding", [self._embedding_classes,
+                                                  self._embedding_size],
+                                    initializer=initializer)
+        embedded = embedding_ops.embedding_lookup(
+            embedding, array_ops.reshape(inputs, [-1]))
+    return embedded
 
 class MultiRNNCell(RNNCell):
   """RNN cell composed sequentially of multiple simple cells."""

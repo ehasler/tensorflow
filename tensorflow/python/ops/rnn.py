@@ -31,9 +31,10 @@ from tensorflow.python.ops import rnn_cell
 from tensorflow.python.ops import tensor_array_ops
 from tensorflow.python.ops import variable_scope as vs
 
+import logging
 
 def rnn(cell, inputs, initial_state=None, dtype=None,
-        sequence_length=None, scope=None):
+        sequence_length=None, scope=None, bucket_length=None, reverse=False):
   """Creates a recurrent neural network specified by RNNCell "cell".
 
   The simplest form of RNN network generated is:
@@ -81,7 +82,6 @@ def rnn(cell, inputs, initial_state=None, dtype=None,
     ValueError: If inputs is None or an empty list, or if the input depth
       cannot be inferred from inputs via shape inference.
   """
-
   if not isinstance(cell, rnn_cell.RNNCell):
     raise TypeError("cell must be an instance of RNNCell")
   if not isinstance(inputs, list):
@@ -122,7 +122,8 @@ def rnn(cell, inputs, initial_state=None, dtype=None,
     if sequence_length is not None:  # Prepare variables
       sequence_length = math_ops.to_int32(sequence_length)
       zero_output = array_ops.zeros(
-          array_ops.pack([batch_size, cell.output_size]), inputs[0].dtype)
+          #array_ops.pack([batch_size, cell.output_size]), inputs[0].dtype)
+          array_ops.pack([batch_size, cell.output_size]), dtypes.float32)
       zero_output.set_shape(
           tensor_shape.TensorShape([fixed_batch_size.value, cell.output_size]))
       min_sequence_length = math_ops.reduce_min(sequence_length)
@@ -136,7 +137,8 @@ def rnn(cell, inputs, initial_state=None, dtype=None,
       if sequence_length is not None:
         (output, state) = _rnn_step(
             time, sequence_length, min_sequence_length, max_sequence_length,
-            zero_output, state, call_cell)
+            zero_output, state, call_cell,
+            bucket_length=bucket_length, reverse=reverse)
       else:
         (output, state) = call_cell()
 
@@ -180,7 +182,8 @@ def state_saving_rnn(cell, inputs, state_saver, state_name,
 
 def _rnn_step(
     time, sequence_length, min_sequence_length, max_sequence_length,
-    zero_output, state, call_cell, skip_conditionals=False):
+    zero_output, state, call_cell, skip_conditionals=False,
+    bucket_length=None, reverse=False):
   """Calculate one step of a dynamic RNN minibatch.
 
   Returns an (output, state) pair conditioned on the sequence_lengths.
@@ -230,7 +233,11 @@ def _rnn_step(
     # Use broadcasting select to determine which values should get
     # the previous state & zero output, and which values should get
     # a calculated state & output.
-    copy_cond = (time >= sequence_length)
+    if reverse:
+      copy_cond = (time < (bucket_length - sequence_length))
+    else:
+      # time is 0-indexed, length is not
+      copy_cond = (time >= sequence_length)
     return (math_ops.select(copy_cond, zero_output, new_output),
             math_ops.select(copy_cond, state, new_state))
 
@@ -238,7 +245,12 @@ def _rnn_step(
     """Run RNN step.  Pass through either no or some past state."""
     new_output, new_state = call_cell()
 
-    return control_flow_ops.cond(
+    if reverse:
+      return control_flow_ops.cond(
+        time >= (bucket_length - min_sequence_length), lambda: (new_output, new_state),
+        lambda: _copy_some_through(new_output, new_state))
+    else:
+      return control_flow_ops.cond(
         # if t < min_seq_len: calculate and return everything
         time < min_sequence_length, lambda: (new_output, new_state),
         # else copy some of it through
@@ -256,7 +268,12 @@ def _rnn_step(
   else:
     empty_update = lambda: (zero_output, state)
 
-    (final_output, final_state) = control_flow_ops.cond(
+    if reverse:
+      (final_output, final_state) = control_flow_ops.cond(
+        time < (bucket_length - max_sequence_length), empty_update,
+        _maybe_copy_some_through)
+    else:
+      (final_output, final_state) = control_flow_ops.cond(
         # if t >= max_seq_len: copy all state through, output zeros
         time >= max_sequence_length, empty_update,
         # otherwise calculation is required: copy some or all of it through
@@ -282,7 +299,11 @@ def _reverse_seq(input_seq, lengths):
   if lengths is None:
     return list(reversed(input_seq))
 
-  input_shape = tensor_shape.matrix(None, None)
+  if len(input_seq[0].get_shape()) == 2:
+    input_shape = tensor_shape.matrix(None, None)
+  else:
+    input_shape = tensor_shape.vector(None)
+  logging.debug("input_shape={}".format(input_shape))
   for input_ in input_seq:
     input_shape.merge_with(input_.get_shape())
     input_.set_shape(input_shape)
@@ -305,7 +326,7 @@ def _reverse_seq(input_seq, lengths):
 
 def bidirectional_rnn(cell_fw, cell_bw, inputs,
                       initial_state_fw=None, initial_state_bw=None,
-                      dtype=None, sequence_length=None, scope=None):
+                      dtype=None, sequence_length=None, scope=None, bucket_length=None):
   """Creates a bidirectional recurrent neural network.
 
   Similar to the unidirectional case above (rnn) but takes input and builds
@@ -357,13 +378,20 @@ def bidirectional_rnn(cell_fw, cell_bw, inputs,
   # Forward direction
   with vs.variable_scope(name + "_FW") as fw_scope:
     output_fw, output_state_fw = rnn(cell_fw, inputs, initial_state_fw, dtype,
-                       sequence_length, scope=fw_scope)
-
+                      #sequence_length, scope=fw_scope, bucket_length=bucket_length, reverse=False)
+                      sequence_length, scope=fw_scope)
   # Backward direction
+  #with vs.variable_scope(name + "_BW") as bw_scope:
+  #  tmp, output_state_bw = rnn(cell_bw, _reverse_seq(inputs, None), initial_state_bw, dtype,
+  #                             sequence_length, scope=bw_scope, bucket_length=bucket_length, reverse=True)
+  #output_bw = _reverse_seq(tmp, None)
+
   with vs.variable_scope(name + "_BW") as bw_scope:
     tmp, output_state_bw = rnn(cell_bw, _reverse_seq(inputs, sequence_length),
-                 initial_state_bw, dtype, sequence_length, scope=bw_scope)
+                #initial_state_bw, dtype, sequence_length, scope=bw_scope, bucket_length=bucket_length, reverse=False)
+                initial_state_bw, dtype, sequence_length, scope=bw_scope)
   output_bw = _reverse_seq(tmp, sequence_length)
+
   # Concat each of the forward/backward outputs
   outputs = [array_ops.concat(1, [fw, bw])
              for fw, bw in zip(output_fw, output_bw)]
