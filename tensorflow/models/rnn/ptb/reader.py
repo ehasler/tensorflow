@@ -1,4 +1,4 @@
-# Copyright 2015 The TensorFlow Authors. All Rights Reserved.
+# Copyright 2015 Google Inc. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -22,12 +22,13 @@ from __future__ import print_function
 import collections
 import os
 
+import numpy as np
 import tensorflow as tf
 
 
 def _read_words(filename):
   with tf.gfile.GFile(filename, "r") as f:
-    return f.read().decode("utf-8").replace("\n", "<eos>").split()
+    return f.read().replace("\n", "<eos>").split()
 
 
 def _build_vocab(filename):
@@ -44,11 +45,11 @@ def _build_vocab(filename):
 
 def _file_to_word_ids(filename, word_to_id):
   data = _read_words(filename)
-  return [word_to_id[word] for word in data if word in word_to_id]
+  return [word_to_id[word] for word in data]
 
 
-def ptb_raw_data(data_path=None):
-  """Load PTB raw data from data directory "data_path".
+def ptb_raw_data(data_dir=None):
+  """Load PTB raw data from data directory "data_dir".
 
   Reads PTB text files, converts strings to integer ids,
   and performs mini-batching of the inputs.
@@ -58,7 +59,7 @@ def ptb_raw_data(data_path=None):
   http://www.fit.vutbr.cz/~imikolov/rnnlm/simple-examples.tgz
 
   Args:
-    data_path: string path to the directory where simple-examples.tgz has
+    data_dir: string path to the directory where simple-examples.tgz has
       been extracted.
 
   Returns:
@@ -66,9 +67,9 @@ def ptb_raw_data(data_path=None):
     where each of the data objects can be passed to PTBIterator.
   """
 
-  train_path = os.path.join(data_path, "ptb.train.txt")
-  valid_path = os.path.join(data_path, "ptb.valid.txt")
-  test_path = os.path.join(data_path, "ptb.test.txt")
+  train_path = os.path.join(data_dir, "ptb.train.txt")
+  valid_path = os.path.join(data_dir, "ptb.valid.txt")
+  test_path = os.path.join(data_dir, "ptb.test.txt")
 
   word_to_id = _build_vocab(train_path)
   train_data = _file_to_word_ids(train_path, word_to_id)
@@ -77,42 +78,55 @@ def ptb_raw_data(data_path=None):
   vocabulary = len(word_to_id)
   return train_data, valid_data, test_data, vocabulary
 
+def read_indexed_data(filename, max_train_data_size=0, vocab_size=None):
+  data = []
+  with tf.gfile.GFile(filename, "r") as f:
+    line_nr = 0
+    for line in f:
+      tok_ids = [ int(x) for x in line.split() ]
+      if vocab_size:
+        tok_ids = [ tok if tok < vocab_size else 0 for tok in tok_ids ] # 0 = UNK_ID
+      tok_ids.append(2) # EOS
+      data.extend(tok_ids)
+      line_nr += 1
+      if max_train_data_size > 0 and \
+        line_nr >= max_train_data_size:
+        break
+  return data
 
-def ptb_producer(raw_data, batch_size, num_steps, name=None):
+def ptb_iterator(raw_data, batch_size, num_steps, start_idx=0):
   """Iterate on the raw PTB data.
 
-  This chunks up raw_data into batches of examples and returns Tensors that
-  are drawn from these batches.
+  This generates batch_size pointers into the raw PTB data, and allows
+  minibatch iteration along these pointers.
 
   Args:
     raw_data: one of the raw data outputs from ptb_raw_data.
     batch_size: int, the batch size.
     num_steps: int, the number of unrolls.
-    name: the name of this operation (optional).
 
-  Returns:
-    A pair of Tensors, each shaped [batch_size, num_steps]. The second element
-    of the tuple is the same data time-shifted to the right by one.
+  Yields:
+    Pairs of the batched data, each a matrix of shape [batch_size, num_steps].
+    The second element of the tuple is the same data time-shifted to the
+    right by one.
 
   Raises:
-    tf.errors.InvalidArgumentError: if batch_size or num_steps are too high.
+    ValueError: if batch_size or num_steps are too high.
   """
-  with tf.name_scope(name, "PTBProducer", [raw_data, batch_size, num_steps]):
-    raw_data = tf.convert_to_tensor(raw_data, name="raw_data", dtype=tf.int32)
+  raw_data = np.array(raw_data, dtype=np.int32)
 
-    data_len = tf.size(raw_data)
-    batch_len = data_len // batch_size
-    data = tf.reshape(raw_data[0 : batch_size * batch_len],
-                      [batch_size, batch_len])
+  data_len = len(raw_data)
+  batch_len = data_len // batch_size
+  data = np.zeros([batch_size, batch_len], dtype=np.int32)
+  for i in range(batch_size):
+    data[i] = raw_data[batch_len * i:batch_len * (i + 1)]
 
-    epoch_size = (batch_len - 1) // num_steps
-    assertion = tf.assert_positive(
-        epoch_size,
-        message="epoch_size == 0, decrease batch_size or num_steps")
-    with tf.control_dependencies([assertion]):
-      epoch_size = tf.identity(epoch_size, name="epoch_size")
+  epoch_size = (batch_len - 1) // num_steps
 
-    i = tf.train.range_input_producer(epoch_size, shuffle=False).dequeue()
-    x = tf.slice(data, [0, i * num_steps], [batch_size, num_steps])
-    y = tf.slice(data, [0, i * num_steps + 1], [batch_size, num_steps])
-    return x, y
+  if epoch_size == 0:
+    raise ValueError("epoch_size == 0, decrease batch_size or num_steps")
+
+  for i in range(start_idx, epoch_size):
+    x = data[:, i*num_steps:(i+1)*num_steps]
+    y = data[:, i*num_steps+1:(i+1)*num_steps+1]
+    yield (x, y)

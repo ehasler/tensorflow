@@ -22,6 +22,7 @@ import gzip
 import os
 import re
 import tarfile
+import subprocess
 
 from six.moves import urllib
 
@@ -45,9 +46,20 @@ _WORD_SPLIT = re.compile(b"([.,!?\"':;)(])")
 _DIGIT_RE = re.compile(br"\d")
 
 # URLs for WMT data.
-_WMT_ENFR_TRAIN_URL = "http://www.statmt.org/wmt10/training-giga-fren.tar"
-_WMT_ENFR_DEV_URL = "http://www.statmt.org/wmt15/dev-v2.tgz"
+_WMT_TRAIN_URL = "http://www.statmt.org/wmt10/training-giga-fren.tar"
+_WMT_DEV_URL = "http://www.statmt.org/wmt15/dev-v2.tgz"
 
+#def swap_pad_unk():
+#  global PAD_ID
+#  global UNK_ID
+#  UNK_ID = 0
+#  PAD_ID = 3
+
+def no_pad_symbol():
+  global PAD_ID
+  global UNK_ID
+  UNK_ID = 0
+  PAD_ID = -1
 
 def maybe_download(directory, filename, url):
   """Download filename from url unless it's already in directory."""
@@ -72,12 +84,12 @@ def gunzip_file(gz_path, new_path):
         new_file.write(line)
 
 
-def get_wmt_enfr_train_set(directory):
+def get_wmt_train_set(directory):
   """Download the WMT en-fr training corpus to directory unless it's there."""
   train_path = os.path.join(directory, "giga-fren.release2.fixed")
   if not (gfile.Exists(train_path +".fr") and gfile.Exists(train_path +".en")):
     corpus_file = maybe_download(directory, "training-giga-fren.tar",
-                                 _WMT_ENFR_TRAIN_URL)
+                                 _WMT_TRAIN_URL)
     print("Extracting tar file %s" % corpus_file)
     with tarfile.open(corpus_file, "r") as corpus_tar:
       corpus_tar.extractall(directory)
@@ -86,32 +98,35 @@ def get_wmt_enfr_train_set(directory):
   return train_path
 
 
-def get_wmt_enfr_dev_set(directory):
+def get_wmt_dev_set(directory):
   """Download the WMT en-fr training corpus to directory unless it's there."""
   dev_name = "newstest2013"
   dev_path = os.path.join(directory, dev_name)
   if not (gfile.Exists(dev_path + ".fr") and gfile.Exists(dev_path + ".en")):
-    dev_file = maybe_download(directory, "dev-v2.tgz", _WMT_ENFR_DEV_URL)
+    dev_file = maybe_download(directory, "dev-v2.tgz", _WMT_DEV_URL)
     print("Extracting tgz file %s" % dev_file)
     with tarfile.open(dev_file, "r:gz") as dev_tar:
-      fr_dev_file = dev_tar.getmember("dev/" + dev_name + ".fr")
-      en_dev_file = dev_tar.getmember("dev/" + dev_name + ".en")
-      fr_dev_file.name = dev_name + ".fr"  # Extract without "dev/" prefix.
-      en_dev_file.name = dev_name + ".en"
-      dev_tar.extract(fr_dev_file, directory)
-      dev_tar.extract(en_dev_file, directory)
+      trg_dev_file = dev_tar.getmember("dev/" + dev_name + ".fr")
+      src_dev_file = dev_tar.getmember("dev/" + dev_name + ".en")
+      trg_dev_file.name = dev_name + ".fr"  # Extract without "dev/" prefix.
+      src_dev_file.name = dev_name + ".en"
+      dev_tar.extract(trg_dev_file, directory)
+      dev_tar.extract(src_dev_file, directory)
   return dev_path
 
 
-def basic_tokenizer(sentence):
+def basic_tokenizer(sentence, is_tokenized):
   """Very basic tokenizer: split the sentence into a list of tokens."""
+  global _WORD_SPLIT
+  if is_tokenized:
+    _WORD_SPLIT = re.compile(b"")
+
   words = []
   for space_separated_fragment in sentence.strip().split():
     words.extend(_WORD_SPLIT.split(space_separated_fragment))
   return [w for w in words if w]
 
-
-def create_vocabulary(vocabulary_path, data_path, max_vocabulary_size,
+def create_vocabulary(vocabulary_path, data_path, max_vocabulary_size, is_tokenized,
                       tokenizer=None, normalize_digits=True):
   """Create vocabulary file (if it does not exist yet) from data file.
 
@@ -130,7 +145,8 @@ def create_vocabulary(vocabulary_path, data_path, max_vocabulary_size,
     normalize_digits: Boolean; if true, all digits are replaced by 0s.
   """
   if not gfile.Exists(vocabulary_path):
-    print("Creating vocabulary %s from data %s" % (vocabulary_path, data_path))
+    print("Creating vocabulary %s from data %s with normalize_digits=%s" % (vocabulary_path, data_path,
+                                                                            normalize_digits))
     vocab = {}
     with gfile.GFile(data_path, mode="rb") as f:
       counter = 0
@@ -139,7 +155,7 @@ def create_vocabulary(vocabulary_path, data_path, max_vocabulary_size,
         if counter % 100000 == 0:
           print("  processing line %d" % counter)
         line = tf.compat.as_bytes(line)
-        tokens = tokenizer(line) if tokenizer else basic_tokenizer(line)
+        tokens = tokenizer(line) if tokenizer else basic_tokenizer(line, is_tokenized)
         for w in tokens:
           word = _DIGIT_RE.sub(b"0", w) if normalize_digits else w
           if word in vocab:
@@ -184,7 +200,7 @@ def initialize_vocabulary(vocabulary_path):
     raise ValueError("Vocabulary file %s not found.", vocabulary_path)
 
 
-def sentence_to_token_ids(sentence, vocabulary,
+def sentence_to_token_ids(sentence, vocabulary, is_tokenized,
                           tokenizer=None, normalize_digits=True):
   """Convert a string to list of integers representing token-ids.
 
@@ -206,14 +222,13 @@ def sentence_to_token_ids(sentence, vocabulary,
   if tokenizer:
     words = tokenizer(sentence)
   else:
-    words = basic_tokenizer(sentence)
+    words = basic_tokenizer(sentence, is_tokenized)
   if not normalize_digits:
     return [vocabulary.get(w, UNK_ID) for w in words]
   # Normalize digits by 0 before looking words up in the vocabulary.
   return [vocabulary.get(_DIGIT_RE.sub(b"0", w), UNK_ID) for w in words]
 
-
-def data_to_token_ids(data_path, target_path, vocabulary_path,
+def data_to_token_ids(data_path, target_path, vocabulary_path, is_tokenized,
                       tokenizer=None, normalize_digits=True):
   """Tokenize data file and turn into token-ids using given vocabulary file.
 
@@ -230,7 +245,6 @@ def data_to_token_ids(data_path, target_path, vocabulary_path,
     normalize_digits: Boolean; if true, all digits are replaced by 0s.
   """
   if not gfile.Exists(target_path):
-    print("Tokenizing data in %s" % data_path)
     vocab, _ = initialize_vocabulary(vocabulary_path)
     with gfile.GFile(data_path, mode="rb") as data_file:
       with gfile.GFile(target_path, mode="w") as tokens_file:
@@ -239,18 +253,30 @@ def data_to_token_ids(data_path, target_path, vocabulary_path,
           counter += 1
           if counter % 100000 == 0:
             print("  tokenizing line %d" % counter)
-          token_ids = sentence_to_token_ids(line, vocab, tokenizer,
+          token_ids = sentence_to_token_ids(line, vocab, is_tokenized, tokenizer,
                                             normalize_digits)
           tokens_file.write(" ".join([str(tok) for tok in token_ids]) + "\n")
 
 
-def prepare_wmt_data(data_dir, en_vocabulary_size, fr_vocabulary_size, tokenizer=None):
+def get_mono_news_data(data_dir, vocabulary_size, lang):
+  train_path = os.path.join(data_dir, "train", "news2015")
+  dev_path = os.path.join(data_dir, "dev", "dev")
+  train_ids_path = train_path + (".ids%d.%s" % (vocabulary_size, lang))
+  dev_ids_path = dev_path + (".ids%d.%s" % (vocabulary_size, lang))
+  #vocab_path = os.path.join(data_dir, "vocab%d.%s" % (vocabulary_size, lang))
+
+  return (train_ids_path, train_ids_path,
+          dev_ids_path, dev_ids_path)
+
+def prepare_wmt_data(data_dir, src_vocabulary_size, trg_vocabulary_size, src_lang, trg_lang,
+                     use_default_data=False, tokenizer=None, normalize_digits=True):
   """Get WMT data into data_dir, create vocabularies and tokenize data.
 
   Args:
     data_dir: directory in which the data sets will be stored.
-    en_vocabulary_size: size of the English vocabulary to create and use.
-    fr_vocabulary_size: size of the French vocabulary to create and use.
+    src_vocabulary_size: size of the English vocabulary to create and use.
+    trg_vocabulary_size: size of the French vocabulary to create and use.
+    use_default_data: use utility methods to download and prepare Gigaword data set
     tokenizer: a function to use to tokenize each data sentence;
       if None, basic_tokenizer will be used.
 
@@ -264,27 +290,72 @@ def prepare_wmt_data(data_dir, en_vocabulary_size, fr_vocabulary_size, tokenizer
       (6) path to the French vocabulary file.
   """
   # Get wmt data to the specified directory.
-  train_path = get_wmt_enfr_train_set(data_dir)
-  dev_path = get_wmt_enfr_dev_set(data_dir)
+  if use_default_data:
+    is_tokenized=False
+    train_path = get_wmt_train_set(data_dir)
+    dev_path = get_wmt_dev_set(data_dir)
+  else:
+    # We assume our train/dev/test data to be already tokenized
+    is_tokenized=True
+    train_path = os.path.join(data_dir, "train", "train")
+    dev_path = os.path.join(data_dir, "dev", "dev")
+    test_path = os.path.join(data_dir, "test", "test")
 
   # Create vocabularies of the appropriate sizes.
-  fr_vocab_path = os.path.join(data_dir, "vocab%d.fr" % fr_vocabulary_size)
-  en_vocab_path = os.path.join(data_dir, "vocab%d.en" % en_vocabulary_size)
-  create_vocabulary(fr_vocab_path, train_path + ".fr", fr_vocabulary_size, tokenizer)
-  create_vocabulary(en_vocab_path, train_path + ".en", en_vocabulary_size, tokenizer)
+  trg_vocab_path = os.path.join(data_dir, "vocab%d.%s" % (trg_vocabulary_size, trg_lang))
+  src_vocab_path = os.path.join(data_dir, "vocab%d.%s" % (src_vocabulary_size, src_lang))
+  create_vocabulary(trg_vocab_path, train_path + "." + trg_lang, trg_vocabulary_size, is_tokenized, tokenizer, normalize_digits)
+  create_vocabulary(src_vocab_path, train_path + "." + src_lang, src_vocabulary_size, is_tokenized, tokenizer, normalize_digits)
 
   # Create token ids for the training data.
-  fr_train_ids_path = train_path + (".ids%d.fr" % fr_vocabulary_size)
-  en_train_ids_path = train_path + (".ids%d.en" % en_vocabulary_size)
-  data_to_token_ids(train_path + ".fr", fr_train_ids_path, fr_vocab_path, tokenizer)
-  data_to_token_ids(train_path + ".en", en_train_ids_path, en_vocab_path, tokenizer)
+  trg_train_ids_path = train_path + (".ids%d.%s" % (trg_vocabulary_size, trg_lang))
+  src_train_ids_path = train_path + (".ids%d.%s" % (src_vocabulary_size, src_lang))
+  data_to_token_ids(train_path + "." + trg_lang, trg_train_ids_path, trg_vocab_path, is_tokenized, tokenizer, normalize_digits)
+  data_to_token_ids(train_path + "." + src_lang, src_train_ids_path, src_vocab_path, is_tokenized, tokenizer, normalize_digits)
 
   # Create token ids for the development data.
-  fr_dev_ids_path = dev_path + (".ids%d.fr" % fr_vocabulary_size)
-  en_dev_ids_path = dev_path + (".ids%d.en" % en_vocabulary_size)
-  data_to_token_ids(dev_path + ".fr", fr_dev_ids_path, fr_vocab_path, tokenizer)
-  data_to_token_ids(dev_path + ".en", en_dev_ids_path, en_vocab_path, tokenizer)
+  trg_dev_ids_path = dev_path + (".ids%d.%s" % (trg_vocabulary_size, trg_lang))
+  src_dev_ids_path = dev_path + (".ids%d.%s" % (src_vocabulary_size, src_lang))
+  data_to_token_ids(dev_path + "." + trg_lang, trg_dev_ids_path, trg_vocab_path, is_tokenized, tokenizer, normalize_digits)
+  data_to_token_ids(dev_path + "." + src_lang, src_dev_ids_path, src_vocab_path, is_tokenized, tokenizer, normalize_digits)
 
-  return (en_train_ids_path, fr_train_ids_path,
-          en_dev_ids_path, fr_dev_ids_path,
-          en_vocab_path, fr_vocab_path)
+  if src_lang == "en" and trg_lang == "de":
+    # Create token ids for the test data.
+    trg_test_ids_path = test_path + (".ids%d.%s" % (trg_vocabulary_size, trg_lang))
+    src_test_ids_path = test_path + (".ids%d.%s" % (src_vocabulary_size, src_lang))
+    data_to_token_ids(test_path + "." + trg_lang, trg_test_ids_path, trg_vocab_path, is_tokenized, tokenizer, normalize_digits)
+    data_to_token_ids(test_path + "." + src_lang, src_test_ids_path, src_vocab_path, is_tokenized, tokenizer, normalize_digits)
+
+  return (src_train_ids_path, trg_train_ids_path,
+          src_dev_ids_path, trg_dev_ids_path,
+          src_vocab_path, trg_vocab_path)
+
+def get_data_set(setname, data_dir, src_vocabulary_size, trg_vocabulary_size, src_lang, trg_lang, use_default_data=False):
+  if use_default_data:
+      dev_name = "newstest2013"
+      path =  os.path.join(data_dir, dev_name)
+  else:
+    # We assume our train/dev/test data to be already tokenized
+    if setname == "dev" or setname == "dev.demo":
+      path = os.path.join(data_dir, "dev", "dev")
+    elif setname == "test" or setname == "test.demo":
+      path = os.path.join(data_dir, "test", "test")
+    elif setname == "test15":
+      path = os.path.join(data_dir, "test15", "test15")
+    else:
+      raise Exception("Unknown setname={}".format(setname))
+
+  if setname == "dev.demo" or setname == "test.demo":
+    src_ids_path = path + (".ids%d.%s.demo" % (src_vocabulary_size, src_lang))
+    trg_ids_path = path + (".ids%d.%s.demo" % (trg_vocabulary_size, src_lang))
+  elif setname == "test15":
+    src_ids_path = path + (".ids%d.%s" % (src_vocabulary_size, src_lang))
+    trg_ids_path = path + (".ids%d.%s" % (trg_vocabulary_size, trg_lang))
+  else:
+    src_ids_path = path + (".ids%d.%s.unk" % (src_vocabulary_size, src_lang))
+    trg_ids_path = path + (".ids%d.%s" % (trg_vocabulary_size, trg_lang))
+
+  cat = subprocess.Popen(("cat", src_ids_path), stdout=subprocess.PIPE)
+  size = int(subprocess.check_output(("wc", "-l"), stdin=cat.stdout).strip())
+  return (src_ids_path, trg_ids_path, size)
+  

@@ -66,9 +66,10 @@ def _infer_state_dtype(explicit_dtype, state):
   else:
     return state.dtype
 
+import logging
 
 def rnn(cell, inputs, initial_state=None, dtype=None,
-        sequence_length=None, scope=None):
+        sequence_length=None, scope=None, bucket_length=None, reverse=False):
   """Creates a recurrent neural network specified by RNNCell `cell`.
 
   The simplest form of RNN network generated is:
@@ -127,7 +128,6 @@ def rnn(cell, inputs, initial_state=None, dtype=None,
     ValueError: If `inputs` is `None` or an empty list, or if the input depth
       (column size) cannot be inferred from inputs via shape inference.
   """
-
   if not isinstance(cell, rnn_cell.RNNCell):
     raise TypeError("cell must be an instance of RNNCell")
   if not nest.is_sequence(inputs):
@@ -204,6 +204,13 @@ def rnn(cell, inputs, initial_state=None, dtype=None,
                                           flat_sequence=flat_zero_output)
 
       sequence_length = math_ops.to_int32(sequence_length)
+
+# TODO: check if the new version does the same as this
+#      zero_output = array_ops.zeros(
+#          array_ops.pack([batch_size, cell.output_size]), dtypes.float32)
+#      zero_output.set_shape(
+#          tensor_shape.TensorShape([fixed_batch_size.value, cell.output_size]))
+
       min_sequence_length = math_ops.reduce_min(sequence_length)
       max_sequence_length = math_ops.reduce_max(sequence_length)
 
@@ -221,7 +228,9 @@ def rnn(cell, inputs, initial_state=None, dtype=None,
             zero_output=zero_output,
             state=state,
             call_cell=call_cell,
-            state_size=cell.state_size)
+            state_size=cell.state_size,
+            bucket_length=bucket_length,
+            reverse=reverse)
       else:
         (output, state) = call_cell()
 
@@ -307,7 +316,8 @@ def state_saving_rnn(cell, inputs, state_saver, state_name,
 # pylint: disable=unused-argument
 def _rnn_step(
     time, sequence_length, min_sequence_length, max_sequence_length,
-    zero_output, state, call_cell, state_size, skip_conditionals=False):
+    zero_output, state, call_cell, state_size, skip_conditionals=False,
+    bucket_length=None, reverse=False):
   """Calculate one step of a dynamic RNN minibatch.
 
   Returns an (output, state) pair conditioned on the sequence_lengths.
@@ -363,20 +373,26 @@ def _rnn_step(
   flat_state = nest.flatten(state)
   flat_zero_output = nest.flatten(zero_output)
 
-  def _copy_one_through(output, new_output):
-    copy_cond = (time >= sequence_length)
+  def _copy_one_through(output, new_output, reverse):
+    if reverse:
+      copy_cond = (time < (bucket_length - sequence_length))
+    else:
+      # time is 0-indexed, length is not
+      copy_cond = (time >= sequence_length)
     return math_ops.select(copy_cond, output, new_output)
 
   def _copy_some_through(flat_new_output, flat_new_state):
     # Use broadcasting select to determine which values should get
     # the previous state & zero output, and which values should get
     # a calculated state & output.
+
     flat_new_output = [
-        _copy_one_through(zero_output, new_output)
+        _copy_one_through(zero_output, new_output, reverse)
         for zero_output, new_output in zip(flat_zero_output, flat_new_output)]
     flat_new_state = [
-        _copy_one_through(state, new_state)
+        _copy_one_through(state, new_state, reverse)
         for state, new_state in zip(flat_state, flat_new_state)]
+
     return flat_new_output + flat_new_state
 
   def _maybe_copy_some_through():
@@ -387,7 +403,13 @@ def _rnn_step(
 
     flat_new_state = nest.flatten(new_state)
     flat_new_output = nest.flatten(new_output)
-    return control_flow_ops.cond(
+
+    if reverse:
+      return control_flow_ops.cond(
+        time >= (bucket_length - min_sequence_length), lambda: flat_new_output + flat_new_state,
+        lambda: _copy_some_through(flat_new_output, flat_new_state))
+    else:
+      return control_flow_ops.cond(
         # if t < min_seq_len: calculate and return everything
         time < min_sequence_length, lambda: flat_new_output + flat_new_state,
         # else copy some of it through
@@ -407,7 +429,13 @@ def _rnn_step(
     final_output_and_state = _copy_some_through(new_output, new_state)
   else:
     empty_update = lambda: flat_zero_output + flat_state
-    final_output_and_state = control_flow_ops.cond(
+
+    if reverse:
+      final_output_and_state = control_flow_ops.cond(
+        time < (bucket_length - max_sequence_length), empty_update,
+        _maybe_copy_some_through)
+    else:
+      final_output_and_state = control_flow_ops.cond(
         # if t >= max_seq_len: copy all state through, output zeros
         time >= max_sequence_length, empty_update,
         # otherwise calculation is required: copy some or all of it through
@@ -480,7 +508,7 @@ def _reverse_seq(input_seq, lengths):
 
 def bidirectional_rnn(cell_fw, cell_bw, inputs,
                       initial_state_fw=None, initial_state_bw=None,
-                      dtype=None, sequence_length=None, scope=None):
+                      dtype=None, sequence_length=None, scope=None, bucket_length=None):
   """Creates a bidirectional recurrent neural network.
 
   Similar to the unidirectional case above (rnn) but takes input and builds
@@ -544,6 +572,7 @@ def bidirectional_rnn(cell_fw, cell_bw, inputs,
                                  dtype, sequence_length, scope=bw_scope)
 
   output_bw = _reverse_seq(tmp, sequence_length)
+
   # Concat each of the forward/backward outputs
   flat_output_fw = nest.flatten(output_fw)
   flat_output_bw = nest.flatten(output_bw)

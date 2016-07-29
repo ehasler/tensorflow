@@ -77,6 +77,14 @@ from tensorflow.python.util import nest
 # TODO(ebrevdo): Remove once _linear is fully deprecated.
 linear = rnn_cell._linear  # pylint: disable=protected-access
 
+from tensorflow.models.rnn.translate.seq2seq.wrapper_cells import BOWCell
+
+from tensorflow.python.ops.math_ops import tanh
+
+from itertools import chain
+import tensorflow as tf
+
+import logging
 
 def _extract_argmax_and_embed(embedding, output_projection=None,
                               update_embedding=True):
@@ -502,7 +510,6 @@ def embedding_tied_rnn_seq2seq(encoder_inputs,
                                     flat_sequence=state_list)
     return outputs_and_state[:outputs_len], state
 
-
 def attention_decoder(decoder_inputs,
                       initial_state,
                       attention_states,
@@ -513,6 +520,10 @@ def attention_decoder(decoder_inputs,
                       dtype=None,
                       scope=None,
                       initial_state_attention=False):
+                      src_mask = None,
+                      maxout_layer=False,
+                      embedding_size=None,
+                      encoder="reverse"):
   """RNN decoder with attention for the sequence-to-sequence model.
 
   In this context "attention" means that, during decoding, the RNN can look up
@@ -584,6 +595,7 @@ def attention_decoder(decoder_inputs,
     if attn_length is None:
       attn_length = shape(attention_states)[1]
     attn_size = attention_states.get_shape()[2].value
+    logging.info("Attn_length=%d attn_size=%d" % (attn_length, attn_size))
 
     # To calculate W1 * h_t we use a 1-by-1 convolution, need to reshape before.
     hidden = array_ops.reshape(
@@ -598,7 +610,32 @@ def attention_decoder(decoder_inputs,
       v.append(
           variable_scope.get_variable("AttnV_%d" % a, [attention_vec_size]))
 
+    def init_state():
+      logging.info("Init decoder state for bow")
+      for a in xrange(num_heads):
+        s = array_ops.ones(array_ops.pack([batch_size, attn_length]), dtype=dtype)
+        s.set_shape([None, attn_length])
+
+        # multiply with source mask, then do softmax
+        if src_mask is not None:
+          s = s * src_mask
+        a = nn_ops.softmax(s)
+
+        if isinstance(cell, BOWCell) and \
+          (isinstance(cell.get_cell(), rnn_cell.LSTMCell) or \
+            isinstance(cell.get_cell(), rnn_cell.BasicLSTMCell)):
+              # C = SUM_t a_t * C~_t or C = SUM_t a_t * i_t * C~_t (hidden is either C~_t or i_t * C~_t, see BOWCell.embed)
+              C = math_ops.reduce_sum(
+                array_ops.reshape(a, [-1, attn_length, 1, 1]) * hidden, [1, 2])
+              h = tanh(C)
+              init_state = array_ops.concat(1, [C, h])
+              return init_state
+        else:
+          raise NotImplementedError("Need to implement decoder state initialization for non-LSTM cells")
+
     state = initial_state
+    if encoder == "bow":
+      state = init_state()
 
     def attention(query):
       """Put attention masks on hidden using hidden_features and query."""
@@ -617,11 +654,13 @@ def attention_decoder(decoder_inputs,
           # Attention mask is a softmax of v^T * tanh(...).
           s = math_ops.reduce_sum(
               v[a] * math_ops.tanh(hidden_features[a] + y), [2, 3])
+          # multiply with source mask, then do softmax
+          if src_mask is not None:
+            s = s * src_mask
           a = nn_ops.softmax(s)
           # Now calculate the attention-weighted vector d.
           d = math_ops.reduce_sum(
-              array_ops.reshape(a, [-1, attn_length, 1, 1]) * hidden,
-              [1, 2])
+              array_ops.reshape(a, [-1, attn_length, 1, 1]) * hidden, [1, 2])
           ds.append(array_ops.reshape(d, [-1, attn_size]))
       return ds
 
@@ -634,6 +673,10 @@ def attention_decoder(decoder_inputs,
       a.set_shape([None, attn_size])
     if initial_state_attention:
       attns = attention(initial_state)
+
+    if maxout_layer:
+      logging.info("Output layer consists of: Merge, Bias, Maxout, Linear, Linear")
+
     for i, inp in enumerate(decoder_inputs):
       if i > 0:
         variable_scope.get_variable_scope().reuse_variables()
@@ -647,21 +690,50 @@ def attention_decoder(decoder_inputs,
         raise ValueError("Could not infer input size from input: %s" % inp.name)
       x = linear([inp] + attns, input_size, True)
       # Run the RNN.
-      cell_output, state = cell(x, state)
+      cell_output, state = cell(x, state) # run cell on combination of input and previous attn masks
+
       # Run the attention mechanism.
       if i == 0 and initial_state_attention:
         with variable_scope.variable_scope(variable_scope.get_variable_scope(),
                                            reuse=True):
-          attns = attention(state)
+          attns = attention(state) # calculate new attention masks (attention-weighted src vector)
       else:
-        attns = attention(state)
+        attns = attention(state) # calculate new attention masks (attention-weighted src vector)
 
-      with variable_scope.variable_scope("AttnOutputProjection"):
-        output = linear([cell_output] + attns, output_size, True)
+      if maxout_layer:
+        # This tries to imitate the blocks Readout layer, consisting of Merge, Bias, Maxout, Linear, Linear
+        # Merge: cell.output_size
+        with tf.variable_scope("AttnMergeProjection"):
+          merge_output = rnn_cell.linear([cell_output] + [inp] + attns, cell.output_size, True)
+
+        # Bias
+        b = tf.get_variable("maxout_b", [cell.output_size])
+        merge_output_plus_b = tf.nn.bias_add(merge_output, b)
+
+        # Maxout: cell.output_size --> maxout_size
+        maxout_size = cell.output_size // 2
+        segment_id_list = [ [i,i] for i in xrange(maxout_size) ] # make pairs of segment ids to be max-ed over
+        segment_id_list = list(chain(*segment_id_list)) # flatten list
+        segment_ids = tf.constant(segment_id_list, dtype=tf.int32)
+        maxout_output = tf.transpose(tf.segment_max(tf.transpose(merge_output_plus_b), segment_ids)) # transpose to get shape (cell.output_size, batch_size) and reverse
+        maxout_output.set_shape([None, maxout_size])
+
+        # Linear, softmax0 (maxout_size --> embedding_size ), without bias
+        with tf.variable_scope("MaxoutOutputProjection_0"):
+          output_embed = rnn_cell.linear([maxout_output], embedding_size, False)
+
+        # Linear, softmax1 (embedding_size --> vocab_size), with bias
+        with tf.variable_scope("MaxoutOutputProjection_1"):
+          output = rnn_cell.linear([output_embed], output_size, True)
+      else:
+        with variable_scope.variable_scope("AttnOutputProjection"):
+          output = linear([cell_output] + attns, output_size, True) # calculate the output
+
       if loop_function is not None:
         prev = output
       outputs.append(output)
 
+  logging.info("output size={}".format(output.get_shape()))
   return outputs, state
 
 
@@ -679,6 +751,9 @@ def embedding_attention_decoder(decoder_inputs,
                                 dtype=None,
                                 scope=None,
                                 initial_state_attention=False):
+                                src_mask=None,
+                                maxout_layer=False,
+                                encoder="reverse"):
   """RNN decoder with embedding and attention and a pure-decoding option.
 
   Args:
@@ -748,7 +823,10 @@ def embedding_attention_decoder(decoder_inputs,
         num_heads=num_heads,
         loop_function=loop_function,
         initial_state_attention=initial_state_attention)
-
+        src_mask=src_mask,
+        maxout_layer=maxout_layer,
+        embedding_size=embedding_size,
+        encoder=encoder)
 
 def embedding_attention_seq2seq(encoder_inputs,
                                 decoder_inputs,
@@ -761,15 +839,22 @@ def embedding_attention_seq2seq(encoder_inputs,
                                 feed_previous=False,
                                 dtype=None,
                                 scope=None,
-                                initial_state_attention=False):
+                                initial_state_attention=False,
+                                encoder="reverse",
+                                sequence_length=None,
+                                bucket_length=None,
+                                src_mask=None,
+                                maxout_layer=False,
+                                init_backward=False,
+                                bow_emb_size=None):
   """Embedding sequence-to-sequence model with attention.
 
   This model first embeds encoder_inputs by a newly created embedding (of shape
-  [num_encoder_symbols x input_size]). Then it runs an RNN to encode
+  [num_encoder_symbols x embedding_size]). Then it runs an RNN to encode
   embedded encoder_inputs into a state vector. It keeps the outputs of this
   RNN at every step to use for attention later. Next, it embeds decoder_inputs
   by another newly created embedding (of shape [num_decoder_symbols x
-  input_size]). Then it runs attention decoder, initialized with the last
+  embedding_size]). Then it runs attention decoder, initialized with the last
   encoder state, on embedded decoder_inputs and attending to encoder outputs.
 
   Warning: when output_projection is None, the size of the attention vectors
@@ -809,22 +894,61 @@ def embedding_attention_seq2seq(encoder_inputs,
   with variable_scope.variable_scope(
       scope or "embedding_attention_seq2seq", dtype=dtype) as scope:
     dtype = scope.dtype
+    logging.debug("Encoder")
     # Encoder.
-    encoder_cell = rnn_cell.EmbeddingWrapper(
+    if encoder == "bidirectional":
+      #cell.set_emb_wrapper(rnn_cell.EmbeddingWrapper, embedding_classes=num_encoder_symbols,
+      #           embedding_size=embedding_size)
+      #encoder_outputs, encoder_state, encoder_state_bw = \
+      #  cell.call_bidirectional(encoder_inputs, dtype=dtype, sequence_length=sequence_length, bucket_length=bucket_length)
+
+      encoder_cell_fw = rnn_cell.EmbeddingWrapper(
+        cell.get_fw_cell(), embedding_classes=num_encoder_symbols,
+        embedding_size=embedding_size)
+      encoder_cell_bw = rnn_cell.EmbeddingWrapper(
+        cell.get_bw_cell(), embedding_classes=num_encoder_symbols,
+        embedding_size=embedding_size)
+      encoder_outputs, encoder_state, encoder_state_bw = rnn.bidirectional_rnn(encoder_cell_fw, encoder_cell_bw,
+                                 encoder_inputs, dtype=dtype,
+                                 sequence_length=sequence_length,
+                                 bucket_length=bucket_length)
+
+      logging.debug("Bidirectional state size=%d" % cell.state_size) # this shows double the size for lstms
+    elif encoder == "reverse":
+      encoder_cell = rnn_cell.EmbeddingWrapper(
         cell, embedding_classes=num_encoder_symbols,
         embedding_size=embedding_size)
-    encoder_outputs, encoder_state = rnn.rnn(
-        encoder_cell, encoder_inputs, dtype=dtype)
+      encoder_outputs, encoder_state = rnn.rnn(
+        encoder_cell, encoder_inputs, dtype=dtype, sequence_length=sequence_length, bucket_length=bucket_length, reverse=True)
+      logging.debug("Unidirectional state size=%d" % cell.state_size)
+    elif encoder == "bow":
+      encoder_outputs, encoder_state = cell.embed(rnn_cell.Embedder, num_encoder_symbols,
+                                                  bow_emb_size, encoder_inputs, dtype=dtype)
 
     # First calculate a concatenation of encoder outputs to put attention on.
-    top_states = [array_ops.reshape(e, [-1, 1, cell.output_size])
+    if encoder == "bow":
+      top_states = [array_ops.reshape(e, [-1, 1, bow_emb_size])
+                  for e in encoder_outputs]
+    else:
+      top_states = [array_ops.reshape(e, [-1, 1, cell.output_size])
                   for e in encoder_outputs]
     attention_states = array_ops.concat(1, top_states)
 
+    initial_state = encoder_state
+    if encoder == "bidirectional" and init_backward:
+      initial_state = encoder_state_bw
+
+    logging.debug("Decoder")
     # Decoder.
+    if encoder == "bidirectional":
+      if init_backward:
+        cell = cell.get_bw_cell()
+      else:
+        cell = cell.get_fw_cell()
+
     output_size = None
     if output_projection is None:
-      cell = rnn_cell.OutputProjectionWrapper(cell, num_decoder_symbols)
+      #cell = rnn_cell.OutputProjectionWrapper(cell, num_decoder_symbols)
       output_size = num_decoder_symbols
 
     if isinstance(feed_previous, bool):
@@ -839,7 +963,10 @@ def embedding_attention_seq2seq(encoder_inputs,
           output_size=output_size,
           output_projection=output_projection,
           feed_previous=feed_previous,
-          initial_state_attention=initial_state_attention)
+          initial_state_attention=initial_state_attention,
+          src_mask=src_mask,
+          maxout_layer=maxout_layer,
+          encoder=encoder)
 
     # If feed_previous is a Tensor, we construct 2 graphs and use cond.
     def decoder(feed_previous_bool):
@@ -858,7 +985,8 @@ def embedding_attention_seq2seq(encoder_inputs,
             output_projection=output_projection,
             feed_previous=feed_previous_bool,
             update_embedding_for_previous=False,
-            initial_state_attention=initial_state_attention)
+            initial_state_attention=initial_state_attention,
+            src_mask=src_mask, maxout_layer=maxout_layer, encoder=encoder)
         state_list = [state]
         if nest.is_sequence(state):
           state_list = nest.flatten(state)
@@ -1118,7 +1246,8 @@ def model_with_buckets(encoder_inputs, decoder_inputs, targets, weights,
       with variable_scope.variable_scope(variable_scope.get_variable_scope(),
                                          reuse=True if j > 0 else None):
         bucket_outputs, _ = seq2seq(encoder_inputs[:bucket[0]],
-                                    decoder_inputs[:bucket[1]])
+                                    decoder_inputs[:bucket[1]],
+                                    bucket[0])
         outputs.append(bucket_outputs)
         if per_example_loss:
           losses.append(sequence_loss_by_example(
