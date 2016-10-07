@@ -74,7 +74,7 @@ class TFSeq2SeqEngine(Engine):
                  num_samples=512, forward_only=False, opt_algorithm="sgd", 
                  encoder="reverse", use_sequence_length=False, use_src_mask=False, 
                  maxout_layer=False, init_backward=False, no_pad_symbol=False,
-                 variable_prefix=None):
+                 variable_prefix=None, init_const=False, use_bow_mask=False):
         self.source_vocab_size = source_vocab_size
         self.target_vocab_size = target_vocab_size
         self.buckets = buckets
@@ -96,6 +96,8 @@ class TFSeq2SeqEngine(Engine):
         self.init_backward = init_backward
         self.no_pad_symbol = no_pad_symbol
         self.variable_prefix = variable_prefix
+        self.init_const = init_const
+        self.use_bow_mask = use_bow_mask
                         
     def update_buckets(self, buckets):
       self.buckets = buckets
@@ -106,18 +108,19 @@ class TFSeq2SeqEngine(Engine):
         '''
         Build the training graph using tensorflow.models.rnn.seq2seq.
         ''' 
-        logging.info("Create training graph")
+        logging.info("Create training graph")       
         return TFSeq2SeqTrainingGraph(self.source_vocab_size, self.target_vocab_size, self.buckets,
                 self.embedding_size, self.hidden_size, self.num_layers, self.max_gradient_norm, self.batch_size, self.learning_rate,
                 self.learning_rate_decay_factor, self.use_lstm, self.num_samples, self.forward_only, self.opt_algorithm, self.encoder,
-                self.use_sequence_length, self.use_src_mask, self.maxout_layer, self.init_backward, self.no_pad_symbol, self.variable_prefix)
+                self.use_sequence_length, self.use_src_mask, self.maxout_layer, self.init_backward, self.no_pad_symbol, self.variable_prefix,
+                self.init_const, self.use_bow_mask)
     
     def create_encoding_graph(self):
       '''
       The returned TFGraph represents the encoding. The output tensors must
       be compatible with the input tensors for create_single_step_decoding_graph.
       '''
-      logging.info("Create encoding graph")
+      logging.info("Create encoding graph")    
       self.encoding_graph = TFSeq2SeqEncodingGraph(self.source_vocab_size, self.buckets, self.embedding_size, self.hidden_size, 
                self.num_layers, self.batch_size, self.use_lstm, self.num_samples, self.encoder, self.use_sequence_length, self.init_backward,
                self.variable_prefix)
@@ -127,7 +130,7 @@ class TFSeq2SeqEngine(Engine):
       logging.info("Create decoding graph")
       self.decoding_graph = TFSeq2SeqSingleStepDecodingGraph(enc_out, self.target_vocab_size, self.buckets, self.embedding_size, self.hidden_size,
                self.num_layers, self.batch_size, self.use_lstm, self.num_samples, self.encoder, self.use_src_mask, self.maxout_layer, self.init_backward,
-               self.variable_prefix)
+               self.variable_prefix, self.init_const, self.use_bow_mask)
       return self.decoding_graph
 
 
@@ -142,13 +145,14 @@ class TFSeq2SeqTrainingGraph(TrainGraph):
                  learning_rate_decay_factor, use_lstm=False,
                  num_samples=512, forward_only=False, opt_algorithm="sgd", encoder="reverse",
                  use_sequence_length=False, use_src_mask=False, maxout_layer=False, init_backward=False, no_pad_symbol=False,
-                 variable_prefix=None):
+                 variable_prefix=None, init_const=False, use_bow_mask=False):
         super(TFSeq2SeqTrainingGraph, self).__init__(buckets, batch_size)
         self.seq2seq_model = Seq2SeqModel(source_vocab_size, target_vocab_size, buckets, embedding_size, hidden_size,
                  num_layers, max_gradient_norm, batch_size, learning_rate,
                  learning_rate_decay_factor, use_lstm,
                  num_samples, forward_only, opt_algorithm, encoder,
-                 use_sequence_length, use_src_mask, maxout_layer, init_backward, no_pad_symbol, variable_prefix)
+                 use_sequence_length, use_src_mask, maxout_layer, init_backward, no_pad_symbol, variable_prefix,
+                 init_const=init_const, use_bow_mask=use_bow_mask)
 
 #        # Change optimizer to ADAgrad if requested
 #        if use_adagrad:
@@ -216,9 +220,13 @@ class TFSeq2SeqEncodingGraph(EncodingGraph):
           if init_backward:
             logging.info("Use backward encoder state to initialize decoder state")
           cell = BidirectionalRNNCell([single_cell] * 2)
-        elif encoder == "bow":
-          logging.info("BOW model")
-          cell = BOWCell([single_cell])          
+        elif encoder == "bow" or encoder == "bow2":
+          logging.info("BOW model")            
+          if num_layers > 1:
+            logging.info("Model with %d layers for the decoder" % num_layers)        
+            cell = BOWCell(tf.nn.rnn_cell.MultiRNNCell([single_cell] * num_layers))
+          else:
+            cell = BOWCell(single_cell)          
         elif num_layers > 1:
           cell = rnn_cell.MultiRNNCell([single_cell] * num_layers)
     
@@ -330,12 +338,12 @@ class TFSeq2SeqEncodingGraph(EncodingGraph):
               encoder_outputs, encoder_state = rnn.rnn(
                 encoder_cell, encoder_inputs, dtype=dtype, sequence_length=sequence_length, bucket_length=bucket_length, reverse=True)
               logging.debug("Unidirectional state size=%d" % cell.state_size)
-            elif encoder == "bow":
+            elif encoder == "bow" or encoder == "bow2":
               encoder_outputs, encoder_state = cell.embed(rnn_cell.Embedder, num_encoder_symbols,
                                                   bow_emb_size, encoder_inputs, dtype=dtype)               
         
             # First calculate a concatenation of encoder outputs to put attention on.
-            if encoder == "bow":
+            if encoder == "bow" or encoder == "bow2":
               top_states = [array_ops.reshape(e, [-1, 1, bow_emb_size])
                   for e in encoder_outputs]
             else:
@@ -430,7 +438,7 @@ class TFSeq2SeqSingleStepDecodingGraph(SingleStepDecodingGraph):
     def __init__(self, enc_out, target_vocab_size, buckets, embedding_size, hidden_size,
                  num_layers, batch_size, use_lstm=False, num_samples=512, 
                  encoder="reverse", use_src_mask=False, maxout_layer=False, init_backward=False,
-                 variable_prefix=None):
+                 variable_prefix=None, init_const=False, use_bow_mask=False):
         super(TFSeq2SeqSingleStepDecodingGraph, self).__init__(buckets, batch_size)
         self.target_vocab_size = target_vocab_size
         self.num_heads = 1
@@ -464,9 +472,13 @@ class TFSeq2SeqSingleStepDecodingGraph(SingleStepDecodingGraph):
         if encoder == "bidirectional":
           logging.info("Bidirectional model")
           cell = BidirectionalRNNCell([single_cell] * 2)
-        elif encoder == "bow":
-          logging.info("BOW model")
-          cell = BOWCell([single_cell])           
+        elif encoder == "bow" or encoder == "bow2":
+          logging.info("BOW model")            
+          if num_layers > 1:
+            logging.info("Model with %d layers for the decoder" % num_layers)        
+            cell = BOWCell(tf.nn.rnn_cell.MultiRNNCell([single_cell] * num_layers))
+          else:
+            cell = BOWCell(single_cell)          
         elif num_layers > 1:
           cell = rnn_cell.MultiRNNCell([single_cell] * num_layers)
     
@@ -480,7 +492,7 @@ class TFSeq2SeqSingleStepDecodingGraph(SingleStepDecodingGraph):
         if encoder == "bidirectional":
           self.dec_state = tf.placeholder(dtypes.float32, shape=[None, cell.fw_state_size],
                                           name="dec_state")
-        elif encoder == "reverse" or encoder == "bow":
+        elif encoder == "reverse" or encoder == "bow" or encoder == "bow2":
           self.dec_state = tf.placeholder(dtypes.float32, shape=[None, cell.state_size],
                                          name="dec_state")                                                                        
 
@@ -490,6 +502,13 @@ class TFSeq2SeqSingleStepDecodingGraph(SingleStepDecodingGraph):
                                          name="src_mask")
         else:
           self.src_mask = None
+
+        if use_bow_mask:
+          logging.info("Using bow mask for output layer") 
+          self.bow_mask = tf.placeholder(dtypes.float32, shape=[None, None],
+                                         name="bow_mask")
+        else:
+          self.bow_mask = None          
 
         # placeholder to indicate whether we're at the start of the target sentence
         self.start = tf.placeholder(tf.bool, name="start")
@@ -504,7 +523,7 @@ class TFSeq2SeqSingleStepDecodingGraph(SingleStepDecodingGraph):
                 decoder_input, self.dec_state, cell, target_vocab_size, embedding_size, 
                 output_projection=output_projection, encoder=encoder, 
                 src_mask=self.src_mask, maxout_layer=maxout_layer, init_backward=init_backward,
-                start=self.start, scope=scope)
+                start=self.start, scope=scope, init_const=init_const, bow_mask=self.bow_mask)
     
         self.dec_decoder_input = tf.placeholder(tf.int32, shape=[None],
                                                     name="dec_decoder_input")
@@ -553,7 +572,7 @@ class TFSeq2SeqSingleStepDecodingGraph(SingleStepDecodingGraph):
       else:
         self.outputs[-1][0] = tf.log(tf.nn.softmax(self.outputs[-1][0]))
         
-    def decode(self, session, enc_out, dec_state, decoder_input, bucket_id, use_src_mask=False, word_count=0):
+    def decode(self, session, enc_out, dec_state, decoder_input, bucket_id, use_src_mask=False, word_count=0, use_bow_mask=False):
         '''Like seq2seq_model.step()
         Returns output, dec_state where dec_state stores the state of the
         decoder cell and the attention network.
@@ -576,6 +595,10 @@ class TFSeq2SeqSingleStepDecodingGraph(SingleStepDecodingGraph):
         else:
           input_feed[self.start] = True
         logging.debug("Word count = {} start = {}".format(word_count, input_feed[self.start]))
+
+        if use_bow_mask:
+          logging.debug("Using bow mask for output layer: feed") 
+          input_feed[self.bow_mask.name] = dec_state["bow_mask"]
                     
         #print("DECODER INPUT FEED")
         #for key in input_feed:
@@ -591,6 +614,9 @@ class TFSeq2SeqSingleStepDecodingGraph(SingleStepDecodingGraph):
         if use_src_mask:
           # pass src mask on
           ret["src_mask"] = dec_state["src_mask"]
+        if use_bow_mask:
+          # pass bow mask on
+          ret["bow_mask"] = dec_state["bow_mask"]          
         return outputs[0], ret
 
     def _tf_dec_embedding_attention_seq2seq(self, enc_out, decoder_input, last_state, cell,
@@ -602,7 +628,9 @@ class TFSeq2SeqSingleStepDecodingGraph(SingleStepDecodingGraph):
                                 src_mask=None,
                                 maxout_layer=False,
                                 init_backward=False,
-                                start=None):
+                                start=None,
+                                init_const=False, 
+                                bow_mask=None):
         """Decode single step version of tensorflow.models.rnn.seq2seq.embedding_attention_seq2seq
         """
         with tf.variable_scope(scope or "embedding_attention_seq2seq", reuse=True): 
@@ -620,14 +648,14 @@ class TFSeq2SeqSingleStepDecodingGraph(SingleStepDecodingGraph):
           return self._tf_dec_embedding_attention_decoder(
             enc_out, decoder_input, last_state, cell,
             num_decoder_symbols, embedding_size, num_heads, output_size, output_projection, src_mask=src_mask, maxout_layer=maxout_layer,
-            encoder=encoder, start=start)
+            encoder=encoder, start=start, init_const=init_const, bow_mask=bow_mask)
         
     def _tf_dec_embedding_attention_decoder(self, enc_out, decoder_input, last_state,
                                     cell, num_symbols, embedding_size, num_heads=1,
                                     output_size=None, output_projection=None,
                                     dtype=dtypes.float32,
                                     scope=None, src_mask=None, maxout_layer=False, encoder="reverse",
-                                    start=None):
+                                    start=None, init_const=False, bow_mask=None):
         """Decode single step version of tensorflow.models.rnn.seq2seq.embedding_attention_decoder
             """
         if output_size is None:
@@ -650,14 +678,14 @@ class TFSeq2SeqSingleStepDecodingGraph(SingleStepDecodingGraph):
           return self._tf_dec_attention_decoder(
               enc_out, emb_inp, last_state, cell, output_size=output_size,
               num_heads=num_heads, src_mask=src_mask, maxout_layer=maxout_layer, embedding_size=embedding_size,
-              encoder=encoder, start=start)#, loop_function=loop_function,
+              encoder=encoder, start=start, init_const=init_const, bow_mask=bow_mask)#, loop_function=loop_function,
               #initial_state_attention=initial_state_attention)
 
         
     def _tf_dec_attention_decoder(self, enc_out, decoder_input, last_state, cell,
                           output_size=None, num_heads=1, dtype=dtypes.float32, scope=None,
                           src_mask=None, maxout_layer=False, embedding_size=None, 
-                          encoder="reverse", start=None):
+                          encoder="reverse", start=None, init_const=False, bow_mask=None):
         """Decode single step version of tensorflow.models.rnn.seq2seq.attention_decoder
         """
         if num_heads < 1:
@@ -692,7 +720,13 @@ class TFSeq2SeqSingleStepDecodingGraph(SingleStepDecodingGraph):
             attn_size = hidden.get_shape()[3].value
             attention_vec_size = attn_size  # Size of query vectors for attention.
             logging.info("Attn_length=%d attn_size=%d" % (attn_length, attn_size))
-        
+
+            def is_LSTM_cell(cell):
+              if isinstance(cell, rnn_cell.LSTMCell) or \
+                 isinstance(cell, rnn_cell.BasicLSTMCell):
+                   return True
+              return False
+
             def init_state():
               logging.info("Init decoder state for bow")
               for a in xrange(num_heads):
@@ -705,34 +739,73 @@ class TFSeq2SeqSingleStepDecodingGraph(SingleStepDecodingGraph):
               a = nn_ops.softmax(s)
               
               if isinstance(cell, BOWCell) and \
-                (isinstance(cell.get_cell(), rnn_cell.LSTMCell) or \
-                isinstance(cell.get_cell(), rnn_cell.BasicLSTMCell)):
+                 (is_LSTM_cell(cell.get_cell()) or \
+                  (isinstance(cell.get_cell(), rnn_cell.MultiRNNCell) and \
+                  (is_LSTM_cell(cell.get_cell()._cells[0]) \
+                  or isinstance(cell.get_cell()._cells[0], rnn_cell.DropoutWrapper)))):
                   # C = SUM_t i_t * C~_t (ignore i_t for now)
                   C = math_ops.reduce_sum(
                     array_ops.reshape(a, [-1, attn_length, 1, 1]) * hidden, [1, 2])                         
                   h = tanh(C)
-                  init_state = array_ops.concat(1, [C, h])
-                  return init_state
+
+                  if is_LSTM_cell(cell.get_cell()):
+                    # single LSTM cell
+                    return array_ops.concat(1, [C, h])
+                  else:
+                    # MultiRNNCell (multi LSTM cell)
+                    unit = array_ops.concat(1, [C, h])
+                    state = unit
+                    count = 1
+                    while (count < cell.get_cell().num_layers):
+                      state = array_ops.concat(1, [state, unit])
+                      count += 1
+                    return state
               else:
                 raise NotImplementedError("Need to implement decoder state initialization for non-LSTM cells")              
-              
+
+            def init_state_const():
+              # TODO: don't hardcode (training) batch size
+              b_size = 80              
+              state_batch = variable_scope.get_variable("DecInit", [b_size, cell.state_size])
+              state = math_ops.reduce_sum(state_batch, [0])
+              state = array_ops.reshape(state, [1, cell.state_size])
+              logging.info("Init decoder state: {} * {} matrix".format(1, cell.state_size))
+              state = init_state()
+              return state
+
+            def init_state_const2():        
+              state = variable_scope.get_variable("DecInit", [1, cell.state_size])              
+              logging.info("Init decoder state: {} * {} matrix".format(1, cell.state_size))
+              state = init_state()
+              return state
+
             def keep_state():
               logging.info("Keep decoder state for bow")
               return last_state
 
-            if encoder == "bow" and start is not None:                
-              last_state = control_flow_ops.cond(start, init_state, keep_state)
+            if encoder == "bow" and start is not None:
+              if init_const:                
+                last_state = control_flow_ops.cond(start, init_state_const, keep_state)
+                last_state.set_shape([None, cell.state_size])
+              else:
+                last_state = control_flow_ops.cond(start, init_state, keep_state)  
+            if encoder == "bow2" and start is not None:
+              if init_const:                
+                last_state = control_flow_ops.cond(start, init_state_const2, keep_state)
+                last_state.set_shape([None, cell.state_size])
+              else:
+                last_state = control_flow_ops.cond(start, init_state, keep_state)          
         
             def attention(query):
               """Put attention masks on hidden using hidden_features and query."""
               ds = []  # Results of attention reads will be stored here.
-              for a in xrange(num_heads):
-                with variable_scope.variable_scope("Attention_%d" % a):
+              for i in xrange(num_heads):
+                with variable_scope.variable_scope("Attention_%d" % i):                  
                   y = rnn_cell.linear(query, attention_vec_size, True)
                   y = array_ops.reshape(y, [-1, 1, 1, attention_vec_size])
                   # Attention mask is a softmax of v^T * tanh(...).
                   s = math_ops.reduce_sum(
-                      v[a] * math_ops.tanh(hidden_features[a] + y), [2, 3])
+                      v[i] * math_ops.tanh(hidden_features[i] + y), [2, 3])
                   # multiply with source mask, then do softmax
                   if src_mask is not None:
                     s = s * src_mask
@@ -749,7 +822,7 @@ class TFSeq2SeqSingleStepDecodingGraph(SingleStepDecodingGraph):
             #    for _ in xrange(num_heads)]
             attns = [tf.placeholder(dtypes.float32,
                 shape=[1, attn_size],
-                name="dec_attns_%d" % a) for a in xrange(num_heads)]
+                name="dec_attns_%d" % i) for i in xrange(num_heads)]
             for a in attns:  # Ensure the second shape of attention vectors is set.
                 a.set_shape([None, attn_size])
 
@@ -766,13 +839,13 @@ class TFSeq2SeqSingleStepDecodingGraph(SingleStepDecodingGraph):
             input_size = decoder_input.get_shape().with_rank(2)[1]
             if input_size.value is None:
               raise ValueError("Could not infer input size from input: %s" % decoder_input.name)
-              
+
             x = rnn_cell.linear([decoder_input] + attns, input_size, True)            
             # Run the RNN.
             cell_output, new_state = cell(x, last_state) # run cell on combination of input and previous attn masks
             # Run the attention mechanism.
             new_attns = attention(new_state) # calculate new attention masks (attention-weighted src vector)
-            
+
             if maxout_layer:
               # This tries to imitate the blocks Readout layer, consisting of Merge, Bias, Maxout, Linear, Linear
               logging.info("Output layer consists of: Merge, Bias, Maxout, Linear, Linear")
@@ -791,7 +864,7 @@ class TFSeq2SeqSingleStepDecodingGraph(SingleStepDecodingGraph):
               segment_ids = tf.constant(segment_id_list, dtype=tf.int32)
               maxout_output = tf.transpose(tf.segment_max(tf.transpose(merge_output_plus_b), segment_ids)) # transpose to get shape (cell.output_size, batch_size) and reverse         
               maxout_output.set_shape([None, maxout_size])
-                 
+
               # Linear, softmax0 (maxout_size --> embedding_size ), without bias
               with tf.variable_scope("MaxoutOutputProjection_0"):
                 output_embed = rnn_cell.linear([maxout_output], embedding_size, False)
@@ -799,12 +872,19 @@ class TFSeq2SeqSingleStepDecodingGraph(SingleStepDecodingGraph):
               # Linear, softmax1 (embedding_size --> vocab_size), with bias
               with tf.variable_scope("MaxoutOutputProjection_1"):
                 output = rnn_cell.linear([output_embed], output_size, True)
-            else:            
+            else:
               with variable_scope.variable_scope("AttnOutputProjection"):
                 output = rnn_cell.linear([cell_output] + new_attns, output_size, True) # calculate the output
-        
+
+            if bow_mask is not None:
+              # Normalize output layer over subset of target words found in input bag-of-words.
+              # To do this without changing the architecture, apply a mask over the output layer
+              # that sets all logits for words outside the bag to zero.
+              logging.info("Use bow mask to locally normalize output layer wrt bow vocabulary")
+              output = output * bow_mask
+
             return [output] + [new_state] + new_attns
-    
+
     def _tf_dec_model_with_buckets(self, enc_out, decoder_input, buckets, seq2seq,
                        name=None, update=False):
         all_inputs = [decoder_input]

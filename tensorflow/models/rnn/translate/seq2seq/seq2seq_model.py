@@ -68,7 +68,9 @@ class Seq2SeqModel(object):
                init_backward=False,
                no_pad_symbol=False,
                variable_prefix=None,
-               rename_variable_prefix=None):
+               rename_variable_prefix=None,
+               init_const=False,
+               use_bow_mask=False):
     """Create the model.
 
     Args:
@@ -138,21 +140,31 @@ class Seq2SeqModel(object):
     else:
       logging.info("Using GRU cells of size={}".format(hidden_size))
     cell = single_cell
+
     if encoder == "bidirectional":
       logging.info("Bidirectional model")
       if init_backward:
         logging.info("Use backward encoder state to initialize decoder state")
       cell = BidirectionalRNNCell([single_cell] * 2)
-    elif encoder == "bow":
-      logging.info("BOW model")
-      cell = BOWCell([single_cell])
+    elif encoder == "bow" or encoder == "bow2":
+      logging.info("BOW model")            
+      if num_layers > 1:
+        logging.info("Model with %d layers for the decoder" % num_layers)
+        keep_prob = 0.35
+        if not forward_only and use_lstm and keep_prob < 1:
+          logging.info("Adding dropout wrapper around lstm cells")
+          single_cell = tf.nn.rnn_cell.DropoutWrapper(
+            single_cell, output_keep_prob=keep_prob)            
+        cell = BOWCell(tf.nn.rnn_cell.MultiRNNCell([single_cell] * num_layers))
+      else:
+        cell = BOWCell(single_cell)  
     elif num_layers > 1:
       logging.info("Model with %d layers" % num_layers)
       cell = tf.nn.rnn_cell.MultiRNNCell([single_cell] * num_layers)
 
 
     # The seq2seq function: we use embedding for the input and attention.
-    logging.debug("Embedding size={}".format(embedding_size))
+    logging.info("Embedding size={}".format(embedding_size))
     scope = None
     if variable_prefix is not None:
       scope = variable_prefix+"/embedding_attention_seq2seq"
@@ -175,7 +187,9 @@ class Seq2SeqModel(object):
           maxout_layer=maxout_layer,
           init_backward=init_backward,
           bow_emb_size=hidden_size,
-          scope=scope)
+          scope=scope,
+          init_const=init_const,
+          bow_mask=self.bow_mask)
 
     # Feeds for inputs.
     self.encoder_inputs = []
@@ -202,7 +216,14 @@ class Seq2SeqModel(object):
                                      name="src_mask")
     else:
       self.src_mask = None
-      
+
+    if use_bow_mask:
+      logging.info("Using bow mask for output layer")
+      self.bow_mask = tf.placeholder(tf.float32, shape=[None, None],
+                                     name="bow_mask")
+    else:
+      self.bow_mask = None
+
     # Our targets are decoder inputs shifted by one.
     targets = [self.decoder_inputs[i + 1]
                for i in xrange(len(self.decoder_inputs) - 1)]
@@ -271,7 +292,8 @@ class Seq2SeqModel(object):
       self.saver_prefix = tf.train.Saver({rename_variable_prefix+"/"+v.op.name: v for v in tf.all_variables()})
 
   def step(self, session, encoder_inputs, decoder_inputs, target_weights,
-           bucket_id, forward_only, sequence_length=None, src_mask=None):
+           bucket_id, forward_only, sequence_length=None, src_mask=None,
+           bow_mask=None):
     """Run a step of the model feeding the given inputs.
 
     Args:
@@ -318,6 +340,10 @@ class Seq2SeqModel(object):
     if src_mask is not None:
       logging.debug("Using source mask for decoder: feed")
       input_feed[self.src_mask.name] = src_mask
+
+    if bow_mask is not None:
+      logging.debug("Using bow mask for decoder: feed")
+      input_feed[self.bow_mask.name] = bow_mask
 
     # Since our targets are decoder inputs shifted by one, we need one more.
     last_target = self.decoder_inputs[decoder_size].name
@@ -378,7 +404,7 @@ class Seq2SeqModel(object):
 
       # Encoder inputs are padded and then reversed.
       encoder_pad = [data_utils.PAD_ID] * (encoder_size - len(encoder_input))
-      if encoder == "bidirectional" or encoder == "bow":
+      if encoder == "bidirectional" or encoder == "bow" or encoder == "bow2":
         # if we use a bidirectional encoder, inputs are reversed for backward state
         encoder_inputs.append(list(encoder_input + encoder_pad))
       elif encoder == "reverse":
@@ -394,6 +420,10 @@ class Seq2SeqModel(object):
 
     src_mask = np.ones((self.batch_size, encoder_size), dtype=np.float32)
 
+    bow_mask = None
+    if (encoder == "bow" or encoder == "bow2") and self.bow_mask is not None:
+      bow_mask = np.zeros((self.batch_size, self.target_vocab_size), dtype=np.float32)
+
     # Batch encoder inputs are just re-indexed encoder_inputs.
     for length_idx in xrange(encoder_size):                     
       for batch_idx in xrange(self.batch_size):
@@ -401,6 +431,13 @@ class Seq2SeqModel(object):
           src_mask[batch_idx, length_idx] = 0
           if self.no_pad_symbol:
             encoder_inputs[batch_idx][length_idx] = data_utils.EOS_ID
+
+        if (encoder == "bow" or encoder == "bow2") and self.bow_mask is not None:
+          word_id = encoder_inputs[batch_idx][length_idx]
+          if word_id != data_utils.GO_ID and \
+            word_id != data_utils.PAD_ID:
+              bow_mask[batch_idx][word_id] = 1.0
+              logging.debug("bow_mask[{}][{}]={}".format(batch_idx, word_id, bow_mask[batch_idx][word_id]))
 
       batch_encoder_inputs.append(
           np.array([encoder_inputs[batch_idx][length_idx]
@@ -419,6 +456,13 @@ class Seq2SeqModel(object):
           batch_weight[batch_idx] = 0.0
         if self.no_pad_symbol and decoder_inputs[batch_idx][length_idx] == data_utils.PAD_ID:
           decoder_inputs[batch_idx][length_idx] = data_utils.EOS_ID
+
+        #if encoder == "bow" and self.bow_mask is not None:
+        #  trg_word_id = decoder_inputs[batch_idx][length_idx]
+        #  if trg_word_id != data_utils.GO_ID and \
+        #    trg_word_id != data_utils.PAD_ID:
+        #      bow_mask[batch_idx][trg_word_id] = 1.0
+
       batch_weights_trg.append(batch_weight)
 
       batch_decoder_inputs.append(
@@ -432,4 +476,8 @@ class Seq2SeqModel(object):
       logging.debug("encoder input={}".format(encoder_inputs[batch_idx]))   
     logging.debug("Sequence length={}".format(sequence_length))
     logging.debug("Source mask={}".format(src_mask))
-    return batch_encoder_inputs, batch_decoder_inputs, batch_weights_trg, sequence_length, src_mask
+    if self.bow_mask is not None:
+      logging.debug("BOW mask={} (sum={})".format(bow_mask, np.sum(bow_mask)))
+      return batch_encoder_inputs, batch_decoder_inputs, batch_weights_trg, sequence_length, src_mask, bow_mask
+    else:
+      return batch_encoder_inputs, batch_decoder_inputs, batch_weights_trg, sequence_length, src_mask

@@ -259,13 +259,23 @@ def data_to_token_ids(data_path, target_path, vocabulary_path, is_tokenized,
 
 
 def get_mono_news_data(data_dir, vocabulary_size, lang):
-  train_path = os.path.join(data_dir, "train", "news2015")
-  dev_path = os.path.join(data_dir, "dev", "dev")
-  train_ids_path = train_path + (".ids%d.%s" % (vocabulary_size, lang))
-  dev_ids_path = dev_path + (".ids%d.%s" % (vocabulary_size, lang))
-  #vocab_path = os.path.join(data_dir, "vocab%d.%s" % (vocabulary_size, lang))
+  if lang == "en":
+    # ptb data
+    train_ids_path_shuffled = os.path.join(data_dir, "train", "train.ids.wordshuf.en")
+    train_ids_path = os.path.join(data_dir, "train", "train.ids.en")
+    dev_ids_path_shuffled = os.path.join(data_dir, "dev", "dev.ids.wordshuf.en")
+    dev_ids_path = os.path.join(data_dir, "dev", "dev.ids.en")
 
-  return (train_ids_path, train_ids_path,
+    return (train_ids_path_shuffled, train_ids_path,
+          dev_ids_path_shuffled, dev_ids_path)
+  else:
+    train_path = os.path.join(data_dir, "train", "news2015")
+    dev_path = os.path.join(data_dir, "dev", "dev")
+    train_ids_path = train_path + (".ids%d.%s" % (vocabulary_size, lang))
+    dev_ids_path = dev_path + (".ids%d.%s" % (vocabulary_size, lang))
+    #vocab_path = os.path.join(data_dir, "vocab%d.%s" % (vocabulary_size, lang))
+
+    return (train_ids_path, train_ids_path,
           dev_ids_path, dev_ids_path)
 
 def prepare_wmt_data(data_dir, src_vocabulary_size, trg_vocabulary_size, src_lang, trg_lang,

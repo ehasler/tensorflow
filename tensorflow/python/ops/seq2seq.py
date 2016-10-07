@@ -519,11 +519,13 @@ def attention_decoder(decoder_inputs,
                       loop_function=None,
                       dtype=None,
                       scope=None,
-                      initial_state_attention=False):
+                      initial_state_attention=False,
                       src_mask = None,
                       maxout_layer=False,
                       embedding_size=None,
-                      encoder="reverse"):
+                      encoder="reverse",
+                      init_const=False,
+                      bow_mask=None):
   """RNN decoder with attention for the sequence-to-sequence model.
 
   In this context "attention" means that, during decoding, the RNN can look up
@@ -610,32 +612,66 @@ def attention_decoder(decoder_inputs,
       v.append(
           variable_scope.get_variable("AttnV_%d" % a, [attention_vec_size]))
 
+    def is_LSTM_cell(cell):
+      if isinstance(cell, rnn_cell.LSTMCell) or \
+         isinstance(cell, rnn_cell.BasicLSTMCell):
+           return True
+      return False
+
     def init_state():
       logging.info("Init decoder state for bow")
-      for a in xrange(num_heads):
+      for i in xrange(num_heads):
+        # matrix of ones
         s = array_ops.ones(array_ops.pack([batch_size, attn_length]), dtype=dtype)
         s.set_shape([None, attn_length])
 
-        # multiply with source mask, then do softmax
+        # multiply with source mask, then do softmax: a_i = 1/src_length
         if src_mask is not None:
           s = s * src_mask
         a = nn_ops.softmax(s)
 
         if isinstance(cell, BOWCell) and \
-          (isinstance(cell.get_cell(), rnn_cell.LSTMCell) or \
-            isinstance(cell.get_cell(), rnn_cell.BasicLSTMCell)):
-              # C = SUM_t a_t * C~_t or C = SUM_t a_t * i_t * C~_t (hidden is either C~_t or i_t * C~_t, see BOWCell.embed)
-              C = math_ops.reduce_sum(
+          (is_LSTM_cell(cell.get_cell()) or \
+           (isinstance(cell.get_cell(), rnn_cell.MultiRNNCell) and \
+            (is_LSTM_cell(cell.get_cell()._cells[0]) \
+              or isinstance(cell.get_cell()._cells[0], rnn_cell.DropoutWrapper)))):
+            # C = SUM_t a_t * C~_t or C = SUM_t a_t * i_t * C~_t (hidden is either C~_t or i_t * C~_t, see BOWCell.embed)
+            C = math_ops.reduce_sum(
                 array_ops.reshape(a, [-1, attn_length, 1, 1]) * hidden, [1, 2])
-              h = tanh(C)
-              init_state = array_ops.concat(1, [C, h])
-              return init_state
+            h = tanh(C)
+            if is_LSTM_cell(cell.get_cell()):
+              # single LSTM cell
+              return array_ops.concat(1, [C, h])
+            else:
+              # MultiRNNCell (multi LSTM cell)
+              unit = array_ops.concat(1, [C, h])
+              state = unit
+              count = 1
+              while (count < cell.get_cell().num_layers):
+                state = array_ops.concat(1, [state, unit])
+                count += 1
+              return state
         else:
           raise NotImplementedError("Need to implement decoder state initialization for non-LSTM cells")
 
     state = initial_state
     if encoder == "bow":
-      state = init_state()
+      if init_const:
+        # TODO: don't hardcode batch size
+        b_size = 80
+        state = variable_scope.get_variable("DecInit", [b_size, cell.state_size])
+        logging.info("Init decoder state: {} * {} matrix".format(b_size, cell.state_size))
+      else:
+        state = init_state()
+    if encoder == "bow2":
+      if init_const:
+        # TODO: don't hardcode batch size
+        b_size = 80
+        state_tmp = [ variable_scope.get_variable("DecInit", [1, cell.state_size]) ] * b_size
+        state = array_ops.concat(0, state_tmp)
+        logging.info("Init decoder state: {} * {} matrix".format(1, cell.state_size))
+      else:
+        state = init_state()
 
     def attention(query):
       """Put attention masks on hidden using hidden_features and query."""
@@ -647,13 +683,13 @@ def attention_decoder(decoder_inputs,
           if ndims:
             assert ndims == 2
         query = array_ops.concat(1, query_list)
-      for a in xrange(num_heads):
-        with variable_scope.variable_scope("Attention_%d" % a):
+      for i in xrange(num_heads):
+        with variable_scope.variable_scope("Attention_%d" % i):
           y = linear(query, attention_vec_size, True)
           y = array_ops.reshape(y, [-1, 1, 1, attention_vec_size])
           # Attention mask is a softmax of v^T * tanh(...).
           s = math_ops.reduce_sum(
-              v[a] * math_ops.tanh(hidden_features[a] + y), [2, 3])
+              v[i] * math_ops.tanh(hidden_features[i] + y), [2, 3])
           # multiply with source mask, then do softmax
           if src_mask is not None:
             s = s * src_mask
@@ -676,6 +712,8 @@ def attention_decoder(decoder_inputs,
 
     if maxout_layer:
       logging.info("Output layer consists of: Merge, Bias, Maxout, Linear, Linear")
+    if bow_mask is not None:
+      logging.info("Use bow mask to locally normalize output layer wrt bow vocabulary")
 
     for i, inp in enumerate(decoder_inputs):
       if i > 0:
@@ -729,6 +767,12 @@ def attention_decoder(decoder_inputs,
         with variable_scope.variable_scope("AttnOutputProjection"):
           output = linear([cell_output] + attns, output_size, True) # calculate the output
 
+      if bow_mask is not None:
+        # Normalize output layer over subset of target words found in input bag-of-words.
+        # To do this without changing the architecture, apply a mask over the output layer
+        # that sets all logits for words outside the bag to zero.
+        output = output * bow_mask
+
       if loop_function is not None:
         prev = output
       outputs.append(output)
@@ -753,7 +797,9 @@ def embedding_attention_decoder(decoder_inputs,
                                 initial_state_attention=False):
                                 src_mask=None,
                                 maxout_layer=False,
-                                encoder="reverse"):
+                                encoder="reverse",
+                                init_const=False,
+                                bow_mask=None):
   """RNN decoder with embedding and attention and a pure-decoding option.
 
   Args:
@@ -822,11 +868,13 @@ def embedding_attention_decoder(decoder_inputs,
         output_size=output_size,
         num_heads=num_heads,
         loop_function=loop_function,
-        initial_state_attention=initial_state_attention)
+        initial_state_attention=initial_state_attention,
         src_mask=src_mask,
         maxout_layer=maxout_layer,
         embedding_size=embedding_size,
-        encoder=encoder)
+        encoder=encoder,
+        init_const=init_const,
+        bow_mask=bow_mask)
 
 def embedding_attention_seq2seq(encoder_inputs,
                                 decoder_inputs,
@@ -846,7 +894,9 @@ def embedding_attention_seq2seq(encoder_inputs,
                                 src_mask=None,
                                 maxout_layer=False,
                                 init_backward=False,
-                                bow_emb_size=None):
+                                bow_emb_size=None,
+                                init_const=False,
+                                bow_mask=None):
   """Embedding sequence-to-sequence model with attention.
 
   This model first embeds encoder_inputs by a newly created embedding (of shape
@@ -897,11 +947,6 @@ def embedding_attention_seq2seq(encoder_inputs,
     logging.debug("Encoder")
     # Encoder.
     if encoder == "bidirectional":
-      #cell.set_emb_wrapper(rnn_cell.EmbeddingWrapper, embedding_classes=num_encoder_symbols,
-      #           embedding_size=embedding_size)
-      #encoder_outputs, encoder_state, encoder_state_bw = \
-      #  cell.call_bidirectional(encoder_inputs, dtype=dtype, sequence_length=sequence_length, bucket_length=bucket_length)
-
       encoder_cell_fw = rnn_cell.EmbeddingWrapper(
         cell.get_fw_cell(), embedding_classes=num_encoder_symbols,
         embedding_size=embedding_size)
@@ -921,12 +966,12 @@ def embedding_attention_seq2seq(encoder_inputs,
       encoder_outputs, encoder_state = rnn.rnn(
         encoder_cell, encoder_inputs, dtype=dtype, sequence_length=sequence_length, bucket_length=bucket_length, reverse=True)
       logging.debug("Unidirectional state size=%d" % cell.state_size)
-    elif encoder == "bow":
+    elif encoder == "bow" or encoder == "bow2":
       encoder_outputs, encoder_state = cell.embed(rnn_cell.Embedder, num_encoder_symbols,
                                                   bow_emb_size, encoder_inputs, dtype=dtype)
 
     # First calculate a concatenation of encoder outputs to put attention on.
-    if encoder == "bow":
+    if encoder == "bow" or encoder == "bow2":
       top_states = [array_ops.reshape(e, [-1, 1, bow_emb_size])
                   for e in encoder_outputs]
     else:
@@ -966,7 +1011,9 @@ def embedding_attention_seq2seq(encoder_inputs,
           initial_state_attention=initial_state_attention,
           src_mask=src_mask,
           maxout_layer=maxout_layer,
-          encoder=encoder)
+          encoder=encoder,
+          init_const=init_const,
+          bow_mask=bow_mask)
 
     # If feed_previous is a Tensor, we construct 2 graphs and use cond.
     def decoder(feed_previous_bool):
