@@ -75,6 +75,8 @@ flags.DEFINE_string(
     "A type of model. Possible options are: small, medium, large.")
 flags.DEFINE_string("data_dir", "/tmp", "data_dir")
 flags.DEFINE_string("train_dir", "/tmp", "Training directory.")
+flags.DEFINE_bool("default_filenames", False, 
+                  "Whether to use the default filenames under the data directory (train.ids.LANG, dev.ids.LANG, test.ids.LANG")
 flags.DEFINE_integer("max_train_data_size", 0, "Limit on the size of training data (0: no limit).") 
 flags.DEFINE_string("device", None, "Device to be used")
 flags.DEFINE_boolean("use_adadelta", False, "Use AdaDelta instead of GradientDescent")
@@ -83,6 +85,7 @@ flags.DEFINE_boolean("use_adam", False, "Use Adam instead of GradientDescent")
 flags.DEFINE_boolean("use_rmsprop", False, "Use RmsProp instead of GradientDescent")
 flags.DEFINE_integer("steps_per_checkpoint", 200, "How many training steps to do per checkpoint.")
 flags.DEFINE_boolean("score", False, "Run rnnlm on test sentence and report logprobs")
+flags.DEFINE_string("lang", "de", "The language of the data")
 
 FLAGS = flags.FLAGS
 
@@ -264,6 +267,20 @@ class MediumConfig(object):
   batch_size = 20
   vocab_size = 10000
 
+class MediumConfig16k(object):
+  """Medium config."""
+  init_scale = 0.05
+  learning_rate = 1.0
+  max_grad_norm = 5
+  num_layers = 2
+  num_steps = 35
+  hidden_size = 650
+  max_epoch = 6
+  max_max_epoch = 39
+  keep_prob = 0.5
+  lr_decay = 0.8
+  batch_size = 20
+  vocab_size = 16162
 
 class LargeConfig(object):
   """Large config."""
@@ -293,6 +310,21 @@ class LargeConfig50k(object):
   keep_prob = 0.35
   lr_decay = 1 / 1.15
   batch_size = 80
+  vocab_size = 50003
+
+class LargeConfig50kDebug(object):
+  """Large config."""
+  init_scale = 0.04
+  learning_rate = 1.0
+  max_grad_norm = 10
+  num_layers = 2
+  num_steps = 35
+  hidden_size = 1500
+  max_epoch = 14
+  max_max_epoch = 55
+  keep_prob = 0.35
+  lr_decay = 1 / 1.15
+  batch_size = 20
   vocab_size = 50003
 
 class TestConfig(object):
@@ -438,10 +470,14 @@ def get_config(model_config):
     return SmallConfig()
   elif model_config == "medium":
     return MediumConfig()
+  elif model_config == "medium16k":
+    return MediumConfig16k()
   elif model_config == "large":
     return LargeConfig()
   elif model_config == "large50k":
     return LargeConfig50k()
+  elif model_config == "large50kdebug":
+    return LargeConfig50kDebug()    
   elif model_config == "test":
     return TestConfig()
   else:
@@ -521,7 +557,8 @@ def main(_):
 
       #raw_data = reader.ptb_raw_data(FLAGS.data_dir)
       #train_data, valid_data, test_data, _ = raw_data
-      indexed_data = reader.indexed_data(FLAGS.data_dir, FLAGS.max_train_data_size, config.vocab_size)
+      indexed_data = reader.indexed_data(FLAGS.data_dir, FLAGS.max_train_data_size, config.vocab_size, 
+                                         FLAGS.lang, FLAGS.default_filenames)
       train_data, valid_data, test_data = indexed_data
 
       if FLAGS.use_adagrad:
@@ -571,6 +608,10 @@ def main(_):
       logging.info("Training finished.")
       test_perplexity = run_epoch(session, mtest, test_data, tf.no_op())
       logging.info("Test Perplexity: %.3f" % test_perplexity)
+
+      checkpoint_path = os.path.join(FLAGS.train_dir, "rnn.ckpt")
+      logging.info("Save final model to path=%s" % checkpoint_path)
+      model.saver.save(session, checkpoint_path, global_step=model.global_step)
 
     logging.info("End: {}".format(datetime.datetime.strftime(datetime.datetime.now(), '%Y-%m-%d %H:%M:%S')))
 

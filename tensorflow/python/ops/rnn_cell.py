@@ -639,6 +639,10 @@ class MultiRNNCell(RNNCell):
   def output_size(self):
     return self._cells[-1].output_size
 
+  @property
+  def num_layers(self):
+    return len(self._cells)
+
   def __call__(self, inputs, state, scope=None):
     """Run this multi-layer cell on inputs, starting from state."""
     with vs.variable_scope(scope or type(self).__name__):  # "MultiRNNCell"

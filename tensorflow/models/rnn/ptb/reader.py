@@ -94,12 +94,27 @@ def read_indexed_data(filename, max_train_data_size=0, vocab_size=None):
         break
   return data
 
-def indexed_data(data_path=None, max_train_data_size=0, vocab_size=None):
-  train_path = os.path.join(data_path, "train/news2015.ids50003.de")
-  valid_path = os.path.join(data_path, "dev/dev.ids50003.de")
-  test_path = os.path.join(data_path, "test15/test15.ids50003.de")
-  
-  train_data = read_indexed_data(train_path, max_train_data_size)
+def indexed_data(data_path=None, max_train_data_size=0, vocab_size=None, lang="de", default_filenames=False):
+  print("LANG={}".format(lang))
+  if default_filenames:
+    train_path = os.path.join(data_path, "train.ids." + lang)
+    valid_path = os.path.join(data_path, "dev.ids." + lang)
+    test_path = os.path.join(data_path, "test.ids." + lang)    
+  else:
+    if lang == "de":
+      train_path = os.path.join(data_path, "train/news2015.ids50003.de")
+      valid_path = os.path.join(data_path, "dev/dev.ids50003.de")
+      test_path = os.path.join(data_path, "test15/test15.ids50003.de")
+    elif lang == "en":
+      train_path = os.path.join(data_path, "train/train.ids.en")
+      valid_path = os.path.join(data_path, "dev/dev.ids.en")
+      test_path = os.path.join(data_path, "test/test.ids.en")
+    else:
+      print("ERROR: undefined language {}".format(lang))
+      import sys
+      sys.exit(1)
+
+  train_data = read_indexed_data(train_path, max_train_data_size, vocab_size=vocab_size)
   valid_data = read_indexed_data(valid_path, vocab_size=vocab_size)
   test_data = read_indexed_data(test_path, vocab_size=vocab_size)
   return train_data, valid_data, test_data
