@@ -154,23 +154,6 @@ class TFSeq2SeqTrainingGraph(TrainGraph):
                  use_sequence_length, use_src_mask, maxout_layer, init_backward, no_pad_symbol, variable_prefix,
                  init_const=init_const, use_bow_mask=use_bow_mask)
 
-#        # Change optimizer to ADAgrad if requested
-#        if use_adagrad:
-#            params = tf.trainable_variables()
-#            if not forward_only:
-#                self.seq2seq_model.gradient_norms = []
-#                self.seq2seq_model.updates = []
-#                opt = tf.train.AdagradOptimizer(learning_rate)
-#                for b in xrange(len(buckets)):
-#                    gradients = tf.gradients(self.seq2seq_model.losses[b], params)
-#                    clipped_gradients, norm = tf.clip_by_global_norm(gradients,
-#                                                             max_gradient_norm)
-#                self.seq2seq_model.gradient_norms.append(norm)
-#                self.seq2seq_model.updates.append(opt.apply_gradients(
-#                    zip(clipped_gradients, params), global_step=self.seq2seq_model.global_step))
-#    
-#            self.seq2seq_model.saver = tf.train.Saver(tf.all_variables())
-
         self.learning_rate = self.seq2seq_model.learning_rate
         self.global_step = self.seq2seq_model.global_step
         self.learning_rate_decay_op = self.seq2seq_model.learning_rate_decay_op
@@ -220,7 +203,7 @@ class TFSeq2SeqEncodingGraph(EncodingGraph):
           if init_backward:
             logging.info("Use backward encoder state to initialize decoder state")
           cell = BidirectionalRNNCell([single_cell] * 2)
-        elif encoder == "bow" or encoder == "bow2":
+        elif encoder == "bow":
           logging.info("BOW model")            
           if num_layers > 1:
             logging.info("Model with %d layers for the decoder" % num_layers)        
@@ -272,8 +255,6 @@ class TFSeq2SeqEncodingGraph(EncodingGraph):
     def encode(self, session, encoder_inputs, bucket_id, sequence_length=None):
         '''Similar to tensorflow.models.rnn.seq2seq.seq2seq_model.step
         Returns last enc state, enc_out'''
-        #print("ENC bucket_id: %d" % bucket_id)
-        #print(self.buckets)
         # Check if the sizes match.
         encoder_size, _ = self.buckets[bucket_id]
         if len(encoder_inputs) != encoder_size:
@@ -316,10 +297,6 @@ class TFSeq2SeqEncodingGraph(EncodingGraph):
         with tf.variable_scope(scope or "embedding_attention_seq2seq", reuse=True):    
             # Encoder.
             if encoder == "bidirectional":
-              #cell.set_emb_wrapper(rnn_cell.EmbeddingWrapper, embedding_classes=num_encoder_symbols,
-              #                     embedding_size=embedding_size)          
-              #encoder_outputs, encoder_state, encoder_state_bw = \
-              #  cell.call_bidirectional(encoder_inputs, dtype=dtype, sequence_length=sequence_length, bucket_length=bucket_length)
               encoder_cell_fw = rnn_cell.EmbeddingWrapper(
                 cell.get_fw_cell(), embedding_classes=num_encoder_symbols,
                 embedding_size=embedding_size)
@@ -338,12 +315,12 @@ class TFSeq2SeqEncodingGraph(EncodingGraph):
               encoder_outputs, encoder_state = rnn.rnn(
                 encoder_cell, encoder_inputs, dtype=dtype, sequence_length=sequence_length, bucket_length=bucket_length, reverse=True)
               logging.debug("Unidirectional state size=%d" % cell.state_size)
-            elif encoder == "bow" or encoder == "bow2":
+            elif encoder == "bow":
               encoder_outputs, encoder_state = cell.embed(rnn_cell.Embedder, num_encoder_symbols,
                                                   bow_emb_size, encoder_inputs, dtype=dtype)               
         
             # First calculate a concatenation of encoder outputs to put attention on.
-            if encoder == "bow" or encoder == "bow2":
+            if encoder == "bow":
               top_states = [array_ops.reshape(e, [-1, 1, bow_emb_size])
                   for e in encoder_outputs]
             else:
@@ -354,15 +331,6 @@ class TFSeq2SeqEncodingGraph(EncodingGraph):
             initial_state = encoder_state
             if encoder == "bidirectional" and init_backward:
               initial_state = encoder_state_bw
-            
-            #return self._tf_enc_embedding_attention_decoder(attention_states, encoder_states[-1], cell, num_heads)
-
-#            return embedding_attention_decoder(
-#                decoder_inputs, encoder_state, attention_states, cell,
-#                num_decoder_symbols, embedding_size, num_heads=num_heads,
-#                output_size=output_size, output_projection=output_projection,
-#                feed_previous=feed_previous,
-#                initial_state_attention=initial_state_attention)
 
             return self._tf_enc_embedding_attention_decoder(
                 attention_states, initial_state, cell, num_heads=num_heads)     
@@ -472,7 +440,7 @@ class TFSeq2SeqSingleStepDecodingGraph(SingleStepDecodingGraph):
         if encoder == "bidirectional":
           logging.info("Bidirectional model")
           cell = BidirectionalRNNCell([single_cell] * 2)
-        elif encoder == "bow" or encoder == "bow2":
+        elif encoder == "bow":
           logging.info("BOW model")            
           if num_layers > 1:
             logging.info("Model with %d layers for the decoder" % num_layers)        
@@ -492,7 +460,7 @@ class TFSeq2SeqSingleStepDecodingGraph(SingleStepDecodingGraph):
         if encoder == "bidirectional":
           self.dec_state = tf.placeholder(dtypes.float32, shape=[None, cell.fw_state_size],
                                           name="dec_state")
-        elif encoder == "reverse" or encoder == "bow" or encoder == "bow2":
+        elif encoder == "reverse" or encoder == "bow":
           self.dec_state = tf.placeholder(dtypes.float32, shape=[None, cell.state_size],
                                          name="dec_state")                                                                        
 
@@ -599,11 +567,6 @@ class TFSeq2SeqSingleStepDecodingGraph(SingleStepDecodingGraph):
         if use_bow_mask:
           logging.debug("Using bow mask for output layer: feed") 
           input_feed[self.bow_mask.name] = dec_state["bow_mask"]
-                    
-        #print("DECODER INPUT FEED")
-        #for key in input_feed:
-        #    print("SHAPE OF %s" % key)
-        #    print(len(input_feed[key]))
             
         # run model for given bucket_id, returns [output] + [new_state] + new_attns
         outputs = session.run(self.outputs[bucket_id], input_feed)
@@ -671,17 +634,12 @@ class TFSeq2SeqSingleStepDecodingGraph(SingleStepDecodingGraph):
           with ops.device("/cpu:0"):
             embedding = variable_scope.get_variable("embedding",
                                                     [num_symbols, embedding_size])
-          #loop_function = _extract_argmax_and_embed(
-          #    embedding, output_projection,
-          #    update_embedding_for_previous)
           emb_inp = embedding_ops.embedding_lookup(embedding, decoder_input)
           return self._tf_dec_attention_decoder(
               enc_out, emb_inp, last_state, cell, output_size=output_size,
               num_heads=num_heads, src_mask=src_mask, maxout_layer=maxout_layer, embedding_size=embedding_size,
-              encoder=encoder, start=start, init_const=init_const, bow_mask=bow_mask)#, loop_function=loop_function,
-              #initial_state_attention=initial_state_attention)
+              encoder=encoder, start=start, init_const=init_const, bow_mask=bow_mask)
 
-        
     def _tf_dec_attention_decoder(self, enc_out, decoder_input, last_state, cell,
                           output_size=None, num_heads=1, dtype=dtypes.float32, scope=None,
                           src_mask=None, maxout_layer=False, embedding_size=None, 
@@ -733,7 +691,7 @@ class TFSeq2SeqSingleStepDecodingGraph(SingleStepDecodingGraph):
                 s = array_ops.ones(array_ops.pack([batch_size, attn_length]), dtype=dtype)
                 s.set_shape([None, attn_length])
               
-                # multiply with source mask, then do softmax
+              # multiply with source mask, then do softmax
               if src_mask is not None:
                 s = s * src_mask
               a = nn_ops.softmax(s)
@@ -773,12 +731,6 @@ class TFSeq2SeqSingleStepDecodingGraph(SingleStepDecodingGraph):
               state = init_state()
               return state
 
-            def init_state_const2():        
-              state = variable_scope.get_variable("DecInit", [1, cell.state_size])              
-              logging.info("Init decoder state: {} * {} matrix".format(1, cell.state_size))
-              state = init_state()
-              return state
-
             def keep_state():
               logging.info("Keep decoder state for bow")
               return last_state
@@ -788,13 +740,7 @@ class TFSeq2SeqSingleStepDecodingGraph(SingleStepDecodingGraph):
                 last_state = control_flow_ops.cond(start, init_state_const, keep_state)
                 last_state.set_shape([None, cell.state_size])
               else:
-                last_state = control_flow_ops.cond(start, init_state, keep_state)  
-            if encoder == "bow2" and start is not None:
-              if init_const:                
-                last_state = control_flow_ops.cond(start, init_state_const2, keep_state)
-                last_state.set_shape([None, cell.state_size])
-              else:
-                last_state = control_flow_ops.cond(start, init_state, keep_state)          
+                last_state = control_flow_ops.cond(start, init_state, keep_state)
         
             def attention(query):
               """Put attention masks on hidden using hidden_features and query."""
@@ -817,9 +763,6 @@ class TFSeq2SeqSingleStepDecodingGraph(SingleStepDecodingGraph):
                   ds.append(array_ops.reshape(d, [-1, attn_size]))
               return ds            
 
-            #batch_attn_size = array_ops.pack([1, attn_size]) # batch_size=1: Batch size during decoding
-            #attns = [array_ops.zeros(batch_attn_size, dtype=dtype)
-            #    for _ in xrange(num_heads)]
             attns = [tf.placeholder(dtypes.float32,
                 shape=[1, attn_size],
                 name="dec_attns_%d" % i) for i in xrange(num_heads)]
@@ -828,14 +771,9 @@ class TFSeq2SeqSingleStepDecodingGraph(SingleStepDecodingGraph):
 
             self.dec_attns.append(attns)
             
-            #last_state.set_shape([None, attn_size])
-    
-            #for i, inp in enumerate(decoder_inputs):
-            #if i > 0:
             variable_scope.get_variable_scope().reuse_variables()
 
             # Merge input and previous attentions into one vector of the right size.
-            #x= rnn_cell.linear([decoder_input] + attns, cell.input_size, True)
             input_size = decoder_input.get_shape().with_rank(2)[1]
             if input_size.value is None:
               raise ValueError("Could not infer input size from input: %s" % decoder_input.name)
@@ -900,12 +838,9 @@ class TFSeq2SeqSingleStepDecodingGraph(SingleStepDecodingGraph):
             with variable_scope.variable_scope(variable_scope.get_variable_scope(),
                                                reuse=True if j > 0 else None):
               logging.debug("dec model for bucket={}".format(bucket))
-              #bucket_outputs, _ = seq2seq(encoder_inputs[:bucket[0]],
-              #                            decoder_inputs[:bucket[1]])                                                 
               bucket_decoder_input = decoder_input
               bucket_enc_out = enc_out[j]
               bucket_outputs = seq2seq(bucket_enc_out, bucket_decoder_input)
-              
               outputs.append(bucket_outputs)
         return outputs
 

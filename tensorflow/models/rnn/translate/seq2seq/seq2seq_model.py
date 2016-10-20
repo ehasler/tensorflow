@@ -70,7 +70,8 @@ class Seq2SeqModel(object):
                variable_prefix=None,
                rename_variable_prefix=None,
                init_const=False,
-               use_bow_mask=False):
+               use_bow_mask=False,
+               max_to_keep=0):
     """Create the model.
 
     Args:
@@ -129,7 +130,7 @@ class Seq2SeqModel(object):
             dtype)
       softmax_loss_function = sampled_loss
     else:
-      logging.info("Using maxout_layer=%d and full softmax loss" % maxout_layer)
+      logging.info("Using maxout_layer=%r and full softmax loss" % maxout_layer)
 
     # Create the internal multi-layer cell for our RNN.
     single_cell = tf.nn.rnn_cell.GRUCell(hidden_size)
@@ -282,10 +283,9 @@ class Seq2SeqModel(object):
     if variable_prefix:
       # save only the variables that belong to the prefix
       logging.info("Using variable prefix={}".format(variable_prefix))
-      self.saver = tf.train.Saver({ v.op.name: v for v in tf.all_variables() if v.op.name.startswith(variable_prefix) })
+      self.saver = tf.train.Saver({ v.op.name: v for v in tf.all_variables() if v.op.name.startswith(variable_prefix) }, max_to_keep=max_to_keep)
     else:
-      #self.saver = tf.train.Saver(tf.all_variables(), max_to_keep=None)
-      self.saver = tf.train.Saver(tf.all_variables())
+      self.saver = tf.train.Saver(tf.all_variables(), max_to_keep=max_to_keep)
 
     if rename_variable_prefix:
       # create a saver that explicitly stores model variables with a prefix
@@ -366,7 +366,7 @@ class Seq2SeqModel(object):
       outputs = session.run(output_feed, input_feed)
       return None, outputs[0], outputs[1:]  # No gradient norm, loss, outputs.
 
-  def get_batch(self, data, bucket_id, encoder="reverse", batch=None, bookk=None):
+  def get_batch(self, data, bucket_id, encoder="reverse", batch_ptr=None, bookk=None):
     """Get a random batch of data from the specified bucket, prepare for step.
 
     To feed data in step(..) it must be a list of batch-major vectors, while
@@ -377,14 +377,15 @@ class Seq2SeqModel(object):
       data: a tuple of size len(self.buckets) in which each element contains
         lists of pairs of input and output data that we use to create a batch.
       bucket_id: integer, which bucket to get the batch for.
-
+      batch_ptr: if given, batch is selected using the bucket_id and the idx_map
+             and train_offset passed as 'batch'
     Returns:
       The triple (encoder_inputs, decoder_inputs, target_weights) for
       the constructed batch that has the proper format to call step(...) later.
     """
-    if batch is not None:
-      train_idx = batch["train_offset"]
-      idx_map = batch["idx_map"][bucket_id]
+    if batch_ptr is not None:
+      train_idx = batch_ptr["offset"]
+      idx_map = batch_ptr["idx_map"]
     
     encoder_size, decoder_size = self.buckets[bucket_id]
     encoder_inputs, decoder_inputs = [], []
@@ -393,7 +394,7 @@ class Seq2SeqModel(object):
     # pad them if needed, reverse encoder inputs and add GO to decoder.
     enc_input_lengths = []
     for _ in xrange(self.batch_size):
-      if batch is not None:
+      if batch_ptr is not None:
         if bookk is not None:
           bookk[bucket_id][idx_map[train_idx]] = 1
         encoder_input, decoder_input = data[bucket_id][idx_map[train_idx]]
@@ -404,7 +405,7 @@ class Seq2SeqModel(object):
 
       # Encoder inputs are padded and then reversed.
       encoder_pad = [data_utils.PAD_ID] * (encoder_size - len(encoder_input))
-      if encoder == "bidirectional" or encoder == "bow" or encoder == "bow2":
+      if encoder == "bidirectional" or encoder == "bow":
         # if we use a bidirectional encoder, inputs are reversed for backward state
         encoder_inputs.append(list(encoder_input + encoder_pad))
       elif encoder == "reverse":
@@ -418,21 +419,24 @@ class Seq2SeqModel(object):
     # Now we create batch-major vectors from the data selected above.
     batch_encoder_inputs, batch_decoder_inputs, batch_weights_trg = [], [], []
 
-    src_mask = np.ones((self.batch_size, encoder_size), dtype=np.float32)
+    src_mask = None
+    if self.src_mask is not None:
+      src_mask = np.ones((self.batch_size, encoder_size), dtype=np.float32)
 
     bow_mask = None
-    if (encoder == "bow" or encoder == "bow2") and self.bow_mask is not None:
+    if encoder == "bow" and self.bow_mask is not None:
       bow_mask = np.zeros((self.batch_size, self.target_vocab_size), dtype=np.float32)
 
     # Batch encoder inputs are just re-indexed encoder_inputs.
     for length_idx in xrange(encoder_size):                     
       for batch_idx in xrange(self.batch_size):
         if encoder_inputs[batch_idx][length_idx] == data_utils.PAD_ID:
-          src_mask[batch_idx, length_idx] = 0
+          if self.src_mask is not None:
+            src_mask[batch_idx, length_idx] = 0
           if self.no_pad_symbol:
             encoder_inputs[batch_idx][length_idx] = data_utils.EOS_ID
 
-        if (encoder == "bow" or encoder == "bow2") and self.bow_mask is not None:
+        if encoder == "bow" and self.bow_mask is not None:
           word_id = encoder_inputs[batch_idx][length_idx]
           if word_id != data_utils.GO_ID and \
             word_id != data_utils.PAD_ID:
@@ -457,12 +461,6 @@ class Seq2SeqModel(object):
         if self.no_pad_symbol and decoder_inputs[batch_idx][length_idx] == data_utils.PAD_ID:
           decoder_inputs[batch_idx][length_idx] = data_utils.EOS_ID
 
-        #if encoder == "bow" and self.bow_mask is not None:
-        #  trg_word_id = decoder_inputs[batch_idx][length_idx]
-        #  if trg_word_id != data_utils.GO_ID and \
-        #    trg_word_id != data_utils.PAD_ID:
-        #      bow_mask[batch_idx][trg_word_id] = 1.0
-
       batch_weights_trg.append(batch_weight)
 
       batch_decoder_inputs.append(
@@ -470,14 +468,16 @@ class Seq2SeqModel(object):
                     for batch_idx in xrange(self.batch_size)], dtype=np.int32))
       
     # Make sequence length vector
-    sequence_length = np.array([enc_input_lengths[batch_idx] 
+    sequence_length = None
+    if self.sequence_length is not None:
+      sequence_length = np.array([enc_input_lengths[batch_idx]
                                 for batch_idx in xrange(self.batch_size)], dtype=np.int32)                                
+
     for batch_idx in xrange(self.batch_size):
-      logging.debug("encoder input={}".format(encoder_inputs[batch_idx]))   
+      logging.debug("encoder input={}".format(encoder_inputs[batch_idx]))
     logging.debug("Sequence length={}".format(sequence_length))
     logging.debug("Source mask={}".format(src_mask))
     if self.bow_mask is not None:
       logging.debug("BOW mask={} (sum={})".format(bow_mask, np.sum(bow_mask)))
-      return batch_encoder_inputs, batch_decoder_inputs, batch_weights_trg, sequence_length, src_mask, bow_mask
-    else:
-      return batch_encoder_inputs, batch_decoder_inputs, batch_weights_trg, sequence_length, src_mask
+
+    return batch_encoder_inputs, batch_decoder_inputs, batch_weights_trg, sequence_length, src_mask, bow_mask

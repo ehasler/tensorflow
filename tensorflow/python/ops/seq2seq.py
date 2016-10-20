@@ -663,15 +663,6 @@ def attention_decoder(decoder_inputs,
         logging.info("Init decoder state: {} * {} matrix".format(b_size, cell.state_size))
       else:
         state = init_state()
-    if encoder == "bow2":
-      if init_const:
-        # TODO: don't hardcode batch size
-        b_size = 80
-        state_tmp = [ variable_scope.get_variable("DecInit", [1, cell.state_size]) ] * b_size
-        state = array_ops.concat(0, state_tmp)
-        logging.info("Init decoder state: {} * {} matrix".format(1, cell.state_size))
-      else:
-        state = init_state()
 
     def attention(query):
       """Put attention masks on hidden using hidden_features and query."""
@@ -966,12 +957,12 @@ def embedding_attention_seq2seq(encoder_inputs,
       encoder_outputs, encoder_state = rnn.rnn(
         encoder_cell, encoder_inputs, dtype=dtype, sequence_length=sequence_length, bucket_length=bucket_length, reverse=True)
       logging.debug("Unidirectional state size=%d" % cell.state_size)
-    elif encoder == "bow" or encoder == "bow2":
+    elif encoder == "bow":
       encoder_outputs, encoder_state = cell.embed(rnn_cell.Embedder, num_encoder_symbols,
                                                   bow_emb_size, encoder_inputs, dtype=dtype)
 
     # First calculate a concatenation of encoder outputs to put attention on.
-    if encoder == "bow" or encoder == "bow2":
+    if encoder == "bow":
       top_states = [array_ops.reshape(e, [-1, 1, bow_emb_size])
                   for e in encoder_outputs]
     else:
