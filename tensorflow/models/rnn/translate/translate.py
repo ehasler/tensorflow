@@ -1,4 +1,4 @@
-# TODO: This file needs major refactoring!!
+# NOTE: This file is deprecated, it has been replaced by train.py and decode.py!!
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
 #
@@ -44,7 +44,6 @@ from tensorflow.models.rnn.translate.utils import data_utils
 from tensorflow.models.rnn.translate.seq2seq import seq2seq_model, tf_seq2seq
 from tensorflow.models.rnn.translate.decoding.decoder import VanillaDecoder, GreedyDecoder, BeamDecoder
 from tensorflow.models.rnn.translate.predictors.tf_neural import NMTPredictor
-#from tensorflow.models.rnn.translate.predictors.automata import FstPredictor
 
 # todo: factor out decoding
 from tensorflow.models.rnn.translate.decoding import core
@@ -52,27 +51,21 @@ from tensorflow.models.rnn.translate.decoding import core
 import subprocess
 from collections import defaultdict
 
-# training settings
+# Training settings
 tf.app.flags.DEFINE_string("src_lang", "en", "Source language")
 tf.app.flags.DEFINE_string("trg_lang", "de", "Target language")
-tf.app.flags.DEFINE_integer("batch_size", 80,
-                            "Batch size to use during training.")
+tf.app.flags.DEFINE_integer("batch_size", 80, "Batch size to use during training.")
 tf.app.flags.DEFINE_string("data_dir", "/tmp", "Data directory")
 tf.app.flags.DEFINE_string("train_dir", "/tmp", "Training directory.")
-tf.app.flags.DEFINE_bool("default_filenames", False, "Whether to use the default filenames under the data directory (train.ids.LANG, dev.ids.LANG")
-tf.app.flags.DEFINE_integer("max_train_data_size", 0,
-                            "Limit on the size of training data (0: no limit).")
-tf.app.flags.DEFINE_integer("max_train_batches", 0,
-                            "Limit on the number of training batches.")
-tf.app.flags.DEFINE_integer("max_train_epochs", 0,
-                            "Limit on the number of training epochs.")
-tf.app.flags.DEFINE_integer("max_epoch", 0,
-                            "Number of training epochs with original learning rate.")
+tf.app.flags.DEFINE_boolean("default_filenames", False, "Whether to use the default filenames under the data directory (train.ids.LANG, dev.ids.LANG")
+tf.app.flags.DEFINE_integer("max_train_data_size", 0, "Limit on the size of training data (0: no limit).")
+tf.app.flags.DEFINE_integer("max_train_batches", 0, "Limit on the number of training batches.")
+tf.app.flags.DEFINE_integer("max_train_epochs", 0, "Limit on the number of training epochs.")
+tf.app.flags.DEFINE_integer("max_epoch", 0, "Number of training epochs with original learning rate.")
 tf.app.flags.DEFINE_boolean("adjust_lr", False, "Adjust learning rate independent of performance.")
-tf.app.flags.DEFINE_integer("steps_per_checkpoint", 200,
-                            "How many training steps to do per checkpoint.")
+tf.app.flags.DEFINE_integer("steps_per_checkpoint", 200, "How many training steps to do per checkpoint.")
 tf.app.flags.DEFINE_string("device", None, "Device to be used")
-tf.app.flags.DEFINE_bool("train_sequential", False, "Shuffle training indices every epoch, then go through set sequentially")
+tf.app.flags.DEFINE_boolean("train_sequential", False, "Shuffle training indices every epoch, then go through set sequentially")
 tf.app.flags.DEFINE_integer("num_symm_buckets", 5, "Use x buckets of equal source/target length, with the largest bucket of length=50 (max_seq_len=50")
 tf.app.flags.DEFINE_boolean("use_default_data", False, "If set, download and prepare Gigaword data set instead of providing custom train/dev/test data. That data will be tokenized first.")
 tf.app.flags.DEFINE_boolean("add_src_eos", False, "Add EOS symbol to all source sentences.")
@@ -81,16 +74,18 @@ tf.app.flags.DEFINE_boolean("no_pad_symbol", False, "Only use GO, EOS, UNK, set 
 tf.app.flags.DEFINE_boolean("init_backward", False, "When using the bidirectional encoder, initialise the hidden decoder state from the backward encoder state (default: forward).")
 tf.app.flags.DEFINE_boolean("bow_init_const", False, "Learn an initialisation matrix for the decoder instead of taking the average of source embeddings")
 tf.app.flags.DEFINE_boolean("use_bow_mask", False, "Normalize decoder output layer over per-sentence BOW vocabulary")
+tf.app.flags.DEFINE_string("variable_prefix", None, "Suffix to add to graph variable names")
+tf.app.flags.DEFINE_boolean("fixed_random_seed", False, "If True, use a fixed random seed to make training reproducible (affects matrix initialization)")
+tf.app.flags.DEFINE_boolean("shuffle_data", True, "If False, do not shuffle the training data to make training reproducible")
+tf.app.flags.DEFINE_integer("max_to_keep", 5, "Number of saved models to keep (set to 0 to keep all models)")
 
-# optimization settings
+# Optimization settings
 tf.app.flags.DEFINE_string("opt_algorithm", "sgd", "Optimization algorithm: sgd, adagrad, adadelta")
 tf.app.flags.DEFINE_float("learning_rate", 1.0, "Learning rate.")
-tf.app.flags.DEFINE_float("learning_rate_decay_factor", 0.99,
-                          "Learning rate decays by this much.")
-tf.app.flags.DEFINE_float("max_gradient_norm", 5.0,
-                          "Clip gradients to this norm.")
+tf.app.flags.DEFINE_float("learning_rate_decay_factor", 0.99, "Learning rate decays by this much.")
+tf.app.flags.DEFINE_float("max_gradient_norm", 5.0, "Clip gradients to this norm.")
 
-# model configuration
+# Model configuration
 tf.app.flags.DEFINE_integer("src_vocab_size", 40000, "Source vocabulary size.")
 tf.app.flags.DEFINE_integer("trg_vocab_size", 40000, "Target vocabulary size.")
 tf.app.flags.DEFINE_boolean("use_lstm", False, "Use LSTM cells instead of GRU cells")
@@ -111,13 +106,10 @@ tf.app.flags.DEFINE_string("model", "tensorflow", "Choose between: tensorflow,ba
                             "the model configuration (will override conflicting individual settings).")
 tf.app.flags.DEFINE_string("config_file", None, "Pass options in a config file (will override conflicting command line settings)")
 
-# decoder settings
-tf.app.flags.DEFINE_string("decode", None,
-                            "Set to stdin/dev/test, stdin evokes interactive decoding.")
-tf.app.flags.DEFINE_string("decoder", "beam",
-                            "Select decoder from vanilla/greedy/beam.")
+# Decoder settings
+tf.app.flags.DEFINE_string("decode", None, "Set to stdin/dev/test, stdin evokes interactive decoding.")
+tf.app.flags.DEFINE_string("decoder", "beam", "Select decoder from vanilla/greedy/beam.")
 tf.app.flags.DEFINE_integer("beam_size", 12, "Beam size for beam decoder")
-tf.app.flags.DEFINE_string("input_path", None, "An integer-encoded input file (TODO!)")
 tf.app.flags.DEFINE_string("output_path", None, "Output path for decoding of dev/test set")
 tf.app.flags.DEFINE_string("range", None, "Range for decoding of dev/test set")
 tf.app.flags.DEFINE_boolean("length_norm", True, "Normalize hypothesis scores by length")
@@ -127,13 +119,11 @@ tf.app.flags.DEFINE_string("fst_path", "fst/%d.fst", "Path to FSTs. Only require
 tf.app.flags.DEFINE_boolean("use_fst_weights", True, "Whether to use weights in FSTs for fst predictor.")
 tf.app.flags.DEFINE_boolean("normalize_fst_weights", True, "Whether to normalize the weights in the FSTs.")
 
-# evaluate settings
-tf.app.flags.DEFINE_string("evaluate", None,
-                            "Set to dev/test to compute multibleu scores of a previously decoded set.")
+# Evaluate settings
+tf.app.flags.DEFINE_string("evaluate", None, "Set to dev/test to compute multibleu scores of a previously decoded set.")
 
-# rename model variables
-tf.app.flags.DEFINE_bool("rename_model_vars", False, "Rename model variables with variable_prefix")
-tf.app.flags.DEFINE_string("variable_prefix", None, "Suffix to add to graph variable names")
+# Rename model variables
+tf.app.flags.DEFINE_boolean("rename_model_vars", False, "Rename model variables with variable_prefix")
 
 FLAGS = tf.app.flags.FLAGS
 
@@ -150,7 +140,7 @@ def process_config():
       key, value = line.strip().split(": ")
       if re.match("^\d+$", value):
         value = int(value)
-      elif re.match("^[\d+\.]$", value):
+      elif re.match("^[\d\.]+$", value):
         value = float(value)
       logging.info("Setting {} from config file: {}".format(key, value))
       FLAGS.__setattr__(key, value)
@@ -158,54 +148,17 @@ def process_config():
 def process_flags():
   # This overrides individual settings for these config options
   if FLAGS.model.startswith("bahdanau"):
-    FLAGS.opt_algorithm = "adadelta" # seems better than sgd in the beginning but similar later on
-    FLAGS.learning_rate = 1.0 # ?
-    FLAGS.max_gradient_norm = 1.0 # ok
-    FLAGS.norm_digits = False # probably ok
-    FLAGS.encoder = "bidirectional" # ok
-    FLAGS.use_seqlen = True # faster
-    FLAGS.use_src_mask = True # faster
-    FLAGS.train_sequential = True # probably ok
-    FLAGS.use_lstm = False # lstm probably better than gru
+    FLAGS.opt_algorithm = "adadelta"
+    FLAGS.learning_rate = 1.0
+    FLAGS.max_gradient_norm = 1.0
+    FLAGS.norm_digits = False
+    FLAGS.encoder = "bidirectional"
+    FLAGS.use_seqlen = True
+    FLAGS.use_src_mask = True
+    FLAGS.train_sequential = True
+    FLAGS.use_lstm = False
 
-#    if FLAGS.model == "bahdanau_sgd":
-#      FLAGS.opt_algorithm = "sgd"
-#    elif FLAGS.model == "bahdanau_sgd_var1": # LR (stopped) -> does not seem to be the main issue
-#      FLAGS.opt_algorithm = "sgd"
-#      FLAGS.learning_rate = 0.5
-#    elif FLAGS.model == "bahdanau_sgd_var2": # LR+MGN -> not good
-#      FLAGS.opt_algorithm = "sgd"
-#      FLAGS.learning_rate = 0.5
-#      FLAGS.max_gradient_norm = 5.0
-#    elif FLAGS.model == "bahdanau_sgd_var4": # LSTM (stopped): 4.41 vs 6.56 after 90k steps
-#      FLAGS.opt_algorithm = "sgd"
-#      FLAGS.use_lstm = True
-#    elif FLAGS.model == "bahdanau_sgd_var5": # src mask (stopped) -> does not seem to make a big difference, but faster using mask
-#      FLAGS.opt_algorithm = "sgd"
-#      FLAGS.use_seqlen = False
-#      FLAGS.use_src_mask = False
-#    elif FLAGS.model == "bahdanau_sgd_var6": # unidirectional (stopped): 4.91 vs 6.50 after 90k steps indicating something may have been wrong with bidirectional
-#      FLAGS.opt_algorithm = "sgd"
-#      FLAGS.encoder = "reverse"
-#    elif FLAGS.model == "bahdanau_sgd_var8": # LSTM, FIX REVERSE (running): 6.11 vs 9.77 after 30k steps (1layer: 7.12 2layer: 7.61), vs 6.55 for LSTM before fixing
-#      FLAGS.opt_algorithm = "sgd"
-#      FLAGS.use_lstm = True
-
-    if FLAGS.model == "bahdanau_lstm": # like var8 but with adadelta
-      FLAGS.use_lstm = True
-    elif FLAGS.model == "bahdanau_lstm_sgd": # like var8
-      FLAGS.use_lstm = True
-      FLAGS.opt_algorithm = "sgd"
-    elif FLAGS.model == "bahdanau_lstm_sgd_eos":
-      FLAGS.use_lstm = True
-      FLAGS.opt_algorithm = "sgd"
-      FLAGS.add_src_eos = True
-    elif FLAGS.model == "bahdanau_lstm_sgd_eos_initbw":
-      FLAGS.use_lstm = True
-      FLAGS.opt_algorithm = "sgd"
-      FLAGS.add_src_eos = True
-      FLAGS.init_backward = True
-    elif FLAGS.model == "bahdanau_lstm_sgd_eos_maxout":
+    if FLAGS.model == "bahdanau_lstm_sgd_eos_maxout":
       FLAGS.use_lstm = True
       FLAGS.opt_algorithm = "sgd"
       FLAGS.add_src_eos = True
@@ -218,6 +171,16 @@ def process_flags():
       FLAGS.maxout_layer = True
       FLAGS.num_samples = 0
       FLAGS.init_backward = True
+    elif FLAGS.model == "bahdanau_lstm_sgd_eos_maxout_initbw_small":
+      FLAGS.use_lstm = True
+      FLAGS.opt_algorithm = "sgd"
+      FLAGS.add_src_eos = True
+      FLAGS.maxout_layer = True
+      FLAGS.num_samples = 0
+      FLAGS.init_backward = True
+      FLAGS.embedding_size = 300
+      FLAGS.hidden_size = 500
+      FLAGS.no_pad_symbol = True
 
   # BOW model setup
   if FLAGS.model.startswith("bow"):
@@ -234,9 +197,6 @@ def process_flags():
     FLAGS.maxout_layer = True
     FLAGS.num_samples = 0
     FLAGS.no_pad_symbol = True
-
-    if FLAGS.model == "bow2":
-      FLAGS.encoder = "bow2"
 
     if FLAGS.model == "bow_ptb":
       FLAGS.embedding_size = 300
@@ -260,10 +220,6 @@ def process_flags():
 
   # Combination schemes
   if FLAGS.length_norm:
-    #if args.apply_combination_scheme_to_partial_hypos:
-    #	core.breakdown2score_partial = core.breakdown2score_length_norm
-    #else:
-    #	core.breakdown2score_full = core.breakdown2score_length_norm
     core.breakdown2score_partial = core.breakdown2score_length_norm
     core.breakdown2score_full = core.breakdown2score_length_norm
 
@@ -370,7 +326,8 @@ def create_model(session, forward_only, buckets, opt_algorithm="sgd",
       use_sequence_length=FLAGS.use_seqlen, use_src_mask=FLAGS.use_src_mask, maxout_layer=FLAGS.maxout_layer,
       init_backward=FLAGS.init_backward, no_pad_symbol=FLAGS.no_pad_symbol,
       variable_prefix=FLAGS.variable_prefix, rename_variable_prefix=rename_variable_prefix,
-      init_const=FLAGS.bow_init_const, use_bow_mask=FLAGS.use_bow_mask)
+      init_const=FLAGS.bow_init_const, use_bow_mask=FLAGS.use_bow_mask,
+      max_to_keep=FLAGS.max_to_keep)
 
     ckpt = tf.train.get_checkpoint_state(FLAGS.train_dir)
     if ckpt and tf.gfile.Exists(ckpt.model_checkpoint_path):
@@ -417,6 +374,8 @@ def train():
 
   with tf.Session(config=tf.ConfigProto(allow_soft_placement=allow_soft_placement, log_device_placement=log_device_placement)) as sess, tf.device(device):
     # Create model.
+    if FLAGS.fixed_random_seed:
+      tf.set_random_seed(1234)
     logging.info("Creating %d layers of %d units, encoder=%s." % (FLAGS.num_layers, FLAGS.hidden_size, FLAGS.encoder))
     model, _ = create_model(sess, False, _buckets, FLAGS.opt_algorithm)
 
@@ -449,11 +408,16 @@ def train():
         # Make sure every bucket has num_items % batch_size == 0 by adding random samples
         if len(train_set[b]) % model.batch_size > 0:
           num_extra = model.batch_size - (len(train_set[b]) % model.batch_size)
-          samples = [ int(r * 10000) for r in np.random.random_sample(num_extra) ]
-          for s in samples:
-            while s >= len(train_set[b]):
-              s = int(s/10)
-            train_set[b].append(train_set[b][s])
+          if FLAGS.shuffle_data:
+            samples = [ int(r * 10000) for r in np.random.random_sample(num_extra) ]
+            for s in samples:
+              while s >= len(train_set[b]):
+                s = int(s/10)
+              train_set[b].append(train_set[b][s])
+          else:
+            # For reproducibility, append the first n examples from a given bucket to its end
+            for i in xrange(num_extra):
+              train_set[b].append(train_set[b][i])
           assert len(train_set[b]) % model.batch_size == 0, "len(train_set[b])=%i mod model.batch_size=%i != 0" % (len(train_set[b]), model.batch_size)
 
       # For each bucket, create a list of indices which we can shuffle and therefore use as a mapping instead of shuffling the data
@@ -478,24 +442,14 @@ def train():
     step_time, loss = 0.0, 0.0
     current_step = 0
     previous_losses = []
-    previous_bleus = []
     logging.info("Time: {}".format(datetime.datetime.strftime(datetime.datetime.now(), '%Y-%m-%d %H:%M:%S')))
     sys.stdout.flush()
-
-    #log_dir = "/home/mifs/ech57/exps/tensorflow/logs"
-    #print ("Write summaries to {}".format(log_dir))
-    #writer = tf.train.SummaryWriter(log_dir, sess.graph)
-    #def feed_dict():
-    #  """Make a TensorFlow feed_dict: maps data onto Tensor placeholders."""
-    #  k = 1.0
-    #  return {keep_prob: k}
 
     bookk = defaultdict(dict)
 
     # Restore saved shuffled train variables
     tmpfile = FLAGS.train_dir+"/tmp_shuffled.pkl"
-    if model.global_step.eval() >= FLAGS.steps_per_checkpoint and \
-      FLAGS.train_sequential:
+    if FLAGS.train_sequential and model.global_step.eval() >= FLAGS.steps_per_checkpoint:
         if tf.gfile.Exists(tmpfile):
           logging.info("Restore saved shuffled train variables from %s" % tmpfile)
           with open(tmpfile, "rb") as f:
@@ -504,6 +458,7 @@ def train():
           logging.info("No file with saved shuffled train variables available, using new shuffling.")
 
     store_shuffled_train_vars = False
+    epoch = 0
     while True:
       if FLAGS.train_sequential:
         global_step = model.global_step.eval() # a step is one batch
@@ -521,12 +476,13 @@ def train():
               logging.info("ERROR: training set has not been fully processed")
             bookk = defaultdict(dict)
 
-          if not (FLAGS.max_train_epochs > 0 and epoch >= FLAGS.max_train_epochs):
-            logging.info("Epoch = %i, shuffling train idx maps and batch pointers" % (int(epoch)+1))
-          store_shuffled_train_vars = True
-          for b in xrange(len(_buckets)):
-            random.shuffle(train_idx_map[b]) # shuffle training idx map for each bucket
-          random.shuffle(bucket_offset_pairs) # shuffle the bucket_id, offset pairs
+          if FLAGS.shuffle_data:
+            if not (FLAGS.max_train_epochs > 0 and epoch >= FLAGS.max_train_epochs):
+              logging.info("Epoch = %i, shuffling train idx maps and batch pointers" % (int(epoch)+1))
+            store_shuffled_train_vars = True
+            for b in xrange(len(_buckets)):
+              random.shuffle(train_idx_map[b]) # shuffle training idx map for each bucket
+            random.shuffle(bucket_offset_pairs) # shuffle the bucket_id, offset pairs
 
           if FLAGS.adjust_lr and FLAGS.max_epoch > 0:
             # adjust learning rate independent of performance
@@ -534,27 +490,28 @@ def train():
             sess.run(model.learning_rate.assign(FLAGS.learning_rate * lr_decay_factor))
             logging.info("Learning rate = {}".format(model.learning_rate.eval()))
 
-        # batch_ptr holds a bucket_id and train_idx
+        # bucket_offset_pair holds a bucket_id and train_idx
         # train_idx is the offset for the batch in the given bucket: all subsequent indices belong to the batch as well
-        batch_ptr = bucket_offset_pairs[current_batch_idx]
+        bucket_offset_pair = bucket_offset_pairs[current_batch_idx]
+        bucket_id = bucket_offset_pair[0]
+        train_offset = bucket_offset_pair[1]
         # idx_map is used to map the train indices to randomly assigned indices in the same bucket
-        idx_map = train_idx_map[batch_ptr[0]]
+        idx_map = train_idx_map[bucket_id]
 
         # This is for debugging only: making sure the order is preserved after reloading the model
         if current_batch_idx+2 < len(bucket_offset_pairs) and (current_step+1) % FLAGS.steps_per_checkpoint == 0:
-          batch_ptr_1 = bucket_offset_pairs[current_batch_idx+1]
-          batch_ptr_2 = bucket_offset_pairs[current_batch_idx+2]
-          idx_map_1 = train_idx_map[batch_ptr_1[0]]
-          idx_map_2 = train_idx_map[batch_ptr_2[0]]
+          bucket_offset_pair_1 = bucket_offset_pairs[current_batch_idx+1]
+          bucket_offset_pair_2 = bucket_offset_pairs[current_batch_idx+2]
+          idx_map_1 = train_idx_map[bucket_offset_pair_1[0]]
+          idx_map_2 = train_idx_map[bucket_offset_pair_2[0]]
           logging.info("Global step = {}, current batch idx = {} current batch = {} -> {}, next two batches = {} -> {}, {} -> {}" .format(model.global_step.eval(), current_batch_idx, \
-                        batch_ptr, idx_map[batch_ptr[1]], \
-                        batch_ptr_1, idx_map_1[batch_ptr_1[1]], \
-                        batch_ptr_2, idx_map_2[batch_ptr_2[1]] ))
+                        bucket_offset_pair, idx_map[train_offset], \
+                        bucket_offset_pair_1, idx_map_1[bucket_offset_pair_1[1]], \
+                        bucket_offset_pair_2, idx_map_2[bucket_offset_pair_2[1]] ))
         else:
-          logging.info("Global step = {}, current batch idx = {} current batch = {} -> {}".format(model.global_step.eval(), current_batch_idx, batch_ptr, idx_map[batch_ptr[1]] ))
+          logging.info("Global step = {}, current batch idx = {} current batch = {} -> {}".format(model.global_step.eval(), current_batch_idx, bucket_offset_pair, idx_map[train_offset] ))
 
-        bucket_id = batch_ptr[0]
-        batch = { "train_offset": batch_ptr[1], "idx_map": train_idx_map }
+        batch_ptr = { "offset": train_offset, "idx_map": idx_map }
       else:
         # Choose a bucket according to data distribution. We pick a random number
         # in [0, 1] and use the corresponding interval in train_buckets_scale.
@@ -567,27 +524,16 @@ def train():
          (FLAGS.max_train_epochs > 0 and epoch >= FLAGS.max_train_epochs):
         # Save final model
         checkpoint_path = os.path.join(FLAGS.train_dir, "translate.ckpt")
-        print("Save model to path=%s" % checkpoint_path)
+        print("Save final model to path=%s after global step=%d" % (checkpoint_path, model.global_step.eval()))
         model.saver.save(sess, checkpoint_path, global_step=model.global_step)
         print("Time: {}".format(datetime.datetime.strftime(datetime.datetime.now(), '%Y-%m-%d %H:%M:%S')))
         return
 
       # Get a batch and make a step.
       start_time = time.time()
-      if FLAGS.use_bow_mask:
-        encoder_inputs, decoder_inputs, target_weights, sequence_length, src_mask, bow_mask = model.get_batch(
-          train_set, bucket_id, FLAGS.encoder, batch=batch if FLAGS.train_sequential else None, bookk=bookk)
-      else:
-        encoder_inputs, decoder_inputs, target_weights, sequence_length, src_mask = model.get_batch(
-          train_set, bucket_id, FLAGS.encoder, batch=batch if FLAGS.train_sequential else None, bookk=bookk)
-      #logging.info("Current_step={} sequence_length={}".format(current_step, sequence_length))
-      if not FLAGS.use_seqlen:
-        sequence_length = None
-      if not FLAGS.use_src_mask:
-        src_mask = None
-      if not FLAGS.use_bow_mask:
-        bow_mask = None
-      #logging.info("Current_step={} decoder_inputs={}".format(current_step, decoder_inputs))
+      encoder_inputs, decoder_inputs, target_weights, sequence_length, src_mask, bow_mask = model.get_batch(
+        train_set, bucket_id, FLAGS.encoder, batch_ptr=batch_ptr if FLAGS.train_sequential else None, bookk=bookk)
+
       _, step_loss, _ = model.step(sess, encoder_inputs, decoder_inputs,
                                    target_weights, bucket_id, False,
                                    sequence_length, src_mask, bow_mask)
@@ -595,12 +541,6 @@ def train():
       step_time += (time.time() - start_time) / FLAGS.steps_per_checkpoint
       loss += step_loss / FLAGS.steps_per_checkpoint
       current_step += 1
-
-      #keep_prob = tf.placeholder(tf.float32)
-      #tf.scalar_summary('dropout_keep_probability'
-      #merged = tf.merge_all_summaries()
-      #summary = sess.run(merged, feed_dict=feed_dict())
-      #writer.add_summary(summary, current_step)
 
       # Once in a while, we save checkpoint, print statistics, and run evals.
       if current_step % FLAGS.steps_per_checkpoint == 0:
@@ -632,7 +572,7 @@ def train():
 
         # Save checkpoint and zero timer and loss.
         checkpoint_path = os.path.join(FLAGS.train_dir, "translate.ckpt")
-        print("Save model to path=%s" % checkpoint_path)
+        print("Save model to path=%s after global step=%d" % (checkpoint_path, model.global_step.eval()))
         model.saver.save(sess, checkpoint_path, global_step=model.global_step)
         step_time, loss = 0.0, 0.0
         sys.stdout.flush()
@@ -644,36 +584,16 @@ def train():
           if len(dev_set[bucket_id]) == 0:
             print("  eval: empty bucket %d" % (bucket_id))
             continue
-          if FLAGS.use_bow_mask:
-            encoder_inputs, decoder_inputs, target_weights, sequence_length, src_mask, bow_mask = model.get_batch(
-              dev_set, bucket_id, FLAGS.encoder)
-          else:
-            encoder_inputs, decoder_inputs, target_weights, sequence_length, src_mask = model.get_batch(
-              dev_set, bucket_id, FLAGS.encoder)
-          if not FLAGS.use_seqlen:
-            sequence_length = None
-          if not FLAGS.use_src_mask:
-            src_mask = None
-          if not FLAGS.use_bow_mask:
-            bow_mask = None
+
+          encoder_inputs, decoder_inputs, target_weights, sequence_length, src_mask, bow_mask = model.get_batch(
+            dev_set, bucket_id, FLAGS.encoder)
+
           _, eval_loss, _ = model.step(sess, encoder_inputs, decoder_inputs,
                                        target_weights, bucket_id, True,
                                        sequence_length, src_mask, bow_mask)
           eval_ppx = math.exp(eval_loss) if eval_loss < 300 else float('inf')
           print("  eval: global step %d bucket %d perplexity %.2f" % (model.global_step.eval(), bucket_id, eval_ppx))
         sys.stdout.flush()
-
-      #if current_step > 50000 and FLAGS.steps_per_checkpoint * 36 == 0:
-        # decode dev set every 6 hours or so
-#      g2 = tf.Graph()
-#      with g2.as_default() as g:
-#        decode("dev", decoder_type="beam")
-#        bleu = eval_set("dev")
-#        # Decrease learning rate if no improvement was seen over last 3 times.
-#      #  if len(previous_losses) > 2 and loss > max(previous_losses[-3:]) and \
-#      #     FLAGS.opt_algorithm == "sgd":
-#      #    sess.run(model.learning_rate_decay_op)
-#      previous_bleus.append(bleu)
 
 def decode(filetype, decoder_type=FLAGS.decoder):
     # Load vocabularies.
@@ -707,10 +627,6 @@ def add_predictors(decoder, session, model):
     for idx,pred in enumerate(preds):
         if pred == "nmt":
             p = NMTPredictor(session, model, FLAGS.encoder, FLAGS.use_seqlen, FLAGS.use_src_mask)
-        #elif pred == "nnlm":
-        #    p = NNLMPredictor(FLAGS.nnlm_path, FLAGS.reset_nnlm)
-        #elif pred == "nplm":
-        #    p = NPLMPredictor(FLAGS.nplm_path)
         elif pred == "fst":
             p = FstPredictor(FLAGS.fst_path, FLAGS.use_fst_weights, FLAGS.normalize_fst_weights)
         else:
@@ -732,8 +648,6 @@ def create_model_and_decoder(session, buckets, decoder_type):
     elif decoder_type == "greedy":
         decoder = GreedyDecoder()
     elif decoder_type == "beam":
-        #decoder = BeamDecoder(FLAGS.beam_size, early_stopping=False)
-        #decoder = BeamDecoder(FLAGS.beam_size, closed_vocab_norm=core.CLOSED_VOCAB_SCORE_NORM_EXACT)
         decoder = BeamDecoder(FLAGS.beam_size, closed_vocab_norm=core.CLOSED_VOCAB_SCORE_NORM_NONE)
     else:
         raise Exception("Unknown decoder type={}".format(FLAGS.decoder))
@@ -802,7 +716,6 @@ def decode_extend(model, decoder, line, src_vocab, rev_trg_vocab, is_tokenized, 
     logging.info("Add new bucket={} and update model".format(bucket))
     global _buckets
     _buckets.append(bucket)
-    #if isinstance(model, tf_seq2seq.TFSeq2SeqEngine):
     model.update_buckets(_buckets)
 
   hypo = decoder.decode(token_ids)[0]
@@ -857,7 +770,6 @@ def main(_):
 
 if __name__ == "__main__":
   logging.getLogger().setLevel(logging.INFO)
-  #logging.getLogger().setLevel(logging.DEBUG)
 
   logging.info("Start: {}".format(datetime.datetime.strftime(datetime.datetime.now(), '%Y-%m-%d %H:%M:%S')))
   tf.app.run()

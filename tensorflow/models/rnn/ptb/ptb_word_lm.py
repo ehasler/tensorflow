@@ -70,13 +70,12 @@ flags = tf.flags
 import logging
 import pickle
 
-flags.DEFINE_string(
-    "model", "small",
-    "A type of model. Possible options are: small, medium, large.")
+flags.DEFINE_string("model", "small", "A type of model. Possible options are: small, medium, large.")
 flags.DEFINE_string("data_dir", "/tmp", "data_dir")
 flags.DEFINE_string("train_dir", "/tmp", "Training directory.")
-flags.DEFINE_bool("default_filenames", False, 
-                  "Whether to use the default filenames under the data directory (train.ids.LANG, dev.ids.LANG, test.ids.LANG")
+flags.DEFINE_string("train_idx", "/tmp/train.ids.en", "Training data (integer-mapped)")
+flags.DEFINE_string("dev_idx", "/tmp/dev.ids.en", "Development data (integer-mapped)")                  
+flags.DEFINE_string("test_idx", "/tmp/test.ids.en", "Test data (integer-mapped)")                   
 flags.DEFINE_integer("max_train_data_size", 0, "Limit on the size of training data (0: no limit).") 
 flags.DEFINE_string("device", None, "Device to be used")
 flags.DEFINE_boolean("use_adadelta", False, "Use AdaDelta instead of GradientDescent")
@@ -85,7 +84,7 @@ flags.DEFINE_boolean("use_adam", False, "Use Adam instead of GradientDescent")
 flags.DEFINE_boolean("use_rmsprop", False, "Use RmsProp instead of GradientDescent")
 flags.DEFINE_integer("steps_per_checkpoint", 200, "How many training steps to do per checkpoint.")
 flags.DEFINE_boolean("score", False, "Run rnnlm on test sentence and report logprobs")
-flags.DEFINE_string("lang", "de", "The language of the data")
+flags.DEFINE_boolean("fixed_random_seed", False, "If True, use a fixed random seed to make training reproducible (affects matrix initialization)")
 
 FLAGS = flags.FLAGS
 
@@ -95,7 +94,8 @@ def log10(x):
   return numerator / denominator
 
 class RNNLMModel(object):
-  """The PTB model."""
+  """The RNNLM model. To use the model in decoding where we need probabilities, pass use_log_probs=True.
+  """
 
   def __init__(self, is_training, config, use_log_probs=False):
     self.batch_size = batch_size = config.batch_size
@@ -174,14 +174,6 @@ class RNNLMModel(object):
         logging.info("Use AdaDeltaOptimizer with lr={}".format(lr))
         optimizer = tf.train.AdadeltaOptimizer(lr, rho=rho, epsilon=epsilon)
       elif FLAGS.use_adagrad:
-        #lr = 0.5
-        #logging.info("Use AdaGradOptimizer with lr={}".format(lr))
-        #optimizer = tf.train.AdagradOptimizer(lr)
-        
-          #lr = 0.1
-        #logging.info("Use AdaGradOptimizer with lr={}".format(lr))
-        #optimizer = tf.train.AdagradOptimizer(lr)
-
         logging.info("Use AdaGradOptimizer with lr={}".format(self.lr))
         optimizer = tf.train.AdagradOptimizer(self.lr)
       elif FLAGS.use_adam:
@@ -197,7 +189,6 @@ class RNNLMModel(object):
         optimizer = tf.train.GradientDescentOptimizer(self.lr)
       self._train_op = optimizer.apply_gradients(zip(grads, tvars), global_step=self.global_step)
     
-    #self.saver = tf.train.Saver(tf.all_variables())
     variable_prefix = "model"
     self.saver = tf.train.Saver({ v.op.name: v for v in tf.all_variables() if v.op.name.startswith(variable_prefix) })
 
@@ -312,38 +303,20 @@ class LargeConfig50k(object):
   batch_size = 80
   vocab_size = 50003
 
-class LargeConfig50kDebug(object):
-  """Large config."""
-  init_scale = 0.04
-  learning_rate = 1.0
-  max_grad_norm = 10
-  num_layers = 2
-  num_steps = 35
-  hidden_size = 1500
-  max_epoch = 14
-  max_max_epoch = 55
-  keep_prob = 0.35
-  lr_decay = 1 / 1.15
-  batch_size = 20
-  vocab_size = 50003
-
 class TestConfig(object):
   """Tiny config, for testing."""
   init_scale = 0.1
   learning_rate = 1.0
   max_grad_norm = 1
   num_layers = 1
-  #num_steps = 2
-  num_steps = 5
+  num_steps = 2
   hidden_size = 2
   max_epoch = 1
   max_max_epoch = 1
   keep_prob = 1.0
   lr_decay = 0.5
-  #batch_size = 20
-  batch_size = 1
-  #vocab_size = 10000
-  vocab_size = 50003
+  batch_size = 20
+  vocab_size = 10000
 
 def run_epoch(session, m, data, eval_op, train=False, start_idx=0, tmpfile=None, 
               m_valid=None, valid_data=None):
@@ -379,13 +352,11 @@ def run_epoch(session, m, data, eval_op, train=False, start_idx=0, tmpfile=None,
       with open(tmpfile, "wb") as f:
         # Training idx = step - 1, so we want to resume from idx = step
         # If we had already restarted from start_idx, this gives the offset
-        #resume_from = step + start_idx
         resume_from = step
         pickle.dump(resume_from, f, pickle.HIGHEST_PROTOCOL)  
 
       checkpoint_path = os.path.join(FLAGS.train_dir, "rnn.ckpt")
-      #finished_idx = step + start_idx -1
-      finished_idx = step -1
+      finished_idx = step - 1
       logging.info("Save model to path=%s after training_idx=%s and global_step=%s" % (checkpoint_path, finished_idx, m.global_step.eval()))
       m.saver.save(session, checkpoint_path, global_step=m.global_step)
       
@@ -407,8 +378,6 @@ def run_epoch(session, m, data, eval_op, train=False, start_idx=0, tmpfile=None,
 
 def run_epoch_eval(session, m, data, eval_op, use_log_probs=False):
   """Runs the model on the given data."""
-  #epoch_size = ((len(data) // m.batch_size) - 1) // m.num_steps
-  #logging.info("Data_size=%s batch_size=%s epoch_size=%s" % (len(data), m.batch_size, epoch_size))
   costs = 0.0
   iters = 0
   logp = 0.0
@@ -423,14 +392,12 @@ def run_epoch_eval(session, m, data, eval_op, use_log_probs=False):
                                   m.initial_state: state})
       logp += (log_probs[0][y[0]])[0]
       wordcn += 1
-      #print ("{} log_prob={} y={}".format(step, log_probs[0][y[0]], y[0]))
     else:
       cost, state, _ = session.run([m.cost, m.final_state, eval_op],
                                  {m.input_data: x,
                                   m.targets: y,
                                   m.initial_state: state})
       costs += cost
-      #print ("{} cost={}".format(step, cost))
       iters += m.num_steps
   
   if use_log_probs:
@@ -444,7 +411,6 @@ def run_epoch_eval(session, m, data, eval_op, use_log_probs=False):
 def run_step_eval(session, m, input_word, prev_state):
   """Runs the model given the previous state and the data.
   Model must have been created with argument use_log_probs=True."""
-  #logging.info("input word={}".format(input_word))
   x = np.zeros([1, 1], dtype=np.int32)
   x[0] = input_word
   log_probs, state = session.run([m.log_probs, m.final_state],
@@ -460,7 +426,6 @@ def score_sentence(session, model, sentence):
     posterior, state = run_step_eval(session, model, sentence[i], state)
     logp += posterior[sentence[i+1]]
     wordcn += 1
-    #print ("{} log_prob={} y={}".format(i+1, posterior[sentence[i+1]], sentence[i+1]))
   logging.info("Test log probability={}".format(logp))
   logging.info("Test PPL: %f", np.exp(-logp/wordcn))
   return logp
@@ -476,12 +441,10 @@ def get_config(model_config):
     return LargeConfig()
   elif model_config == "large50k":
     return LargeConfig50k()
-  elif model_config == "large50kdebug":
-    return LargeConfig50kDebug()    
   elif model_config == "test":
     return TestConfig()
   else:
-    raise ValueError("Invalid model: %s", FLAGS.model)
+    raise ValueError("Invalid model: %s", model_config)
 
 def load_model(session, model_config, train_dir, use_log_probs=False):
   # Create and load model for decoding
@@ -519,22 +482,15 @@ def main(_):
       
     if FLAGS.score:
       use_log_probs = True
-      #use_log_probs = False
       logging.info("Run model in scoring mode")
-      train_dir = "train.rnn.de"      
-      train_dir = "train.rnn.de.fixed"
+      train_dir = "train.rnn.de"
       model, _ = load_model(session, "large50k", train_dir, use_log_probs)
-  
-      #num_test_sents = 2169
-      #test_data = reader.indexed_data_test(FLAGS.data_dir, num_test_sents)
+
+      #test_path = os.path.join(FLAGS.data_dir, "test15/test15.ids50003.de")
+      #test_data = reader.read_indexed_data(test_path)
       #test_sentences = [ test_data ]
   
-      # add eos symbol to the beginning to score first word as well
-      test_sentences = [[2, 19, 44, 393, 9, 1834, 4],
-                        [2, 19, 393, 9, 1834, 44, 4],
-                        [2, 1834, 44, 19, 393, 9, 4],
-                        [2, 4, 1834, 9, 393, 44, 19],
-                        [2, 393, 393, 393, 393, 393, 4]]
+      # Add eos symbol to the beginning to score first word as well
       test_sentences = [[2, 5, 3316, 7930, 7, 7312, 9864, 30, 8, 10453, 4, 2],
                         [2, 7, 5, 30, 8, 10453, 7930, 3316, 7312, 9864, 4, 2],
                         [2, 5, 8, 30, 7, 4, 9864, 3316, 7312, 7930, 10453, 2],
@@ -557,12 +513,14 @@ def main(_):
 
       #raw_data = reader.ptb_raw_data(FLAGS.data_dir)
       #train_data, valid_data, test_data, _ = raw_data
-      indexed_data = reader.indexed_data(FLAGS.data_dir, FLAGS.max_train_data_size, config.vocab_size, 
-                                         FLAGS.lang, FLAGS.default_filenames)
-      train_data, valid_data, test_data = indexed_data
+      train_data = reader.read_indexed_data(FLAGS.train_idx, FLAGS.max_train_data_size, config.vocab_size)
+      valid_data = reader.read_indexed_data(FLAGS.dev_idx, vocab_size=config.vocab_size)
+      test_data = reader.read_indexed_data(FLAGS.test_idx, vocab_size=config.vocab_size)
 
       if FLAGS.use_adagrad:
         config.learning_rate = 0.5
+      if FLAGS.fixed_random_seed:
+        tf.set_random_seed(1234)
 
       initializer = tf.random_uniform_initializer(-config.init_scale,
                                                 config.init_scale)
@@ -590,7 +548,6 @@ def main(_):
             logging.info("Restore saved train variable from %s, resume from train idx=%i" % (tmpfile, start_idx))
 
       for i in range(config.max_max_epoch):
-        #if not (FLAGS.use_adadelta or FLAGS.use_adagrad or FLAGS.use_adam):
         if not (FLAGS.use_adadelta or FLAGS.use_adam):
           lr_decay = config.lr_decay ** max(i - config.max_epoch, 0.0)
           model.assign_lr(session, config.learning_rate * lr_decay)

@@ -48,8 +48,8 @@ def _file_to_word_ids(filename, word_to_id):
   return [word_to_id[word] for word in data]
 
 
-def ptb_raw_data(data_path=None):
-  """Load PTB raw data from data directory "data_path".
+def ptb_raw_data(data_dir=None):
+  """Load PTB raw data from data directory "data_dir".
 
   Reads PTB text files, converts strings to integer ids,
   and performs mini-batching of the inputs.
@@ -59,7 +59,7 @@ def ptb_raw_data(data_path=None):
   http://www.fit.vutbr.cz/~imikolov/rnnlm/simple-examples.tgz
 
   Args:
-    data_path: string path to the directory where simple-examples.tgz has
+    data_dir: string path to the directory where simple-examples.tgz has
       been extracted.
 
   Returns:
@@ -67,9 +67,9 @@ def ptb_raw_data(data_path=None):
     where each of the data objects can be passed to PTBIterator.
   """
 
-  train_path = os.path.join(data_path, "ptb.train.txt")
-  valid_path = os.path.join(data_path, "ptb.valid.txt")
-  test_path = os.path.join(data_path, "ptb.test.txt")
+  train_path = os.path.join(data_dir, "ptb.train.txt")
+  valid_path = os.path.join(data_dir, "ptb.valid.txt")
+  test_path = os.path.join(data_dir, "ptb.test.txt")
 
   word_to_id = _build_vocab(train_path)
   train_data = _file_to_word_ids(train_path, word_to_id)
@@ -93,36 +93,6 @@ def read_indexed_data(filename, max_train_data_size=0, vocab_size=None):
         line_nr >= max_train_data_size:
         break
   return data
-
-def indexed_data(data_path=None, max_train_data_size=0, vocab_size=None, lang="de", default_filenames=False):
-  print("LANG={}".format(lang))
-  if default_filenames:
-    train_path = os.path.join(data_path, "train.ids." + lang)
-    valid_path = os.path.join(data_path, "dev.ids." + lang)
-    test_path = os.path.join(data_path, "test.ids." + lang)    
-  else:
-    if lang == "de":
-      train_path = os.path.join(data_path, "train/news2015.ids50003.de")
-      valid_path = os.path.join(data_path, "dev/dev.ids50003.de")
-      test_path = os.path.join(data_path, "test15/test15.ids50003.de")
-    elif lang == "en":
-      train_path = os.path.join(data_path, "train/train.ids.en")
-      valid_path = os.path.join(data_path, "dev/dev.ids.en")
-      test_path = os.path.join(data_path, "test/test.ids.en")
-    else:
-      print("ERROR: undefined language {}".format(lang))
-      import sys
-      sys.exit(1)
-
-  train_data = read_indexed_data(train_path, max_train_data_size, vocab_size=vocab_size)
-  valid_data = read_indexed_data(valid_path, vocab_size=vocab_size)
-  test_data = read_indexed_data(test_path, vocab_size=vocab_size)
-  return train_data, valid_data, test_data
-  
-def indexed_data_test(data_path=None, max_test_data_size=0, vocab_size=None):
-  test_path = os.path.join(data_path, "test15/test15.ids50003.de")
-  test_data = read_indexed_data(test_path, max_test_data_size, vocab_size)
-  return test_data  
 
 def ptb_iterator(raw_data, batch_size, num_steps, start_idx=0):
   """Iterate on the raw PTB data.
