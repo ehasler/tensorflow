@@ -57,20 +57,18 @@ from __future__ import division
 from __future__ import print_function
 
 import sys, os
-import time, datetime
-
-import numpy as np
+import datetime
+import logging
+import pickle
+import copy
 import tensorflow as tf
 
-from tensorflow.models.rnn.ptb import reader
+from tensorflow.models.rnn.ptb import reader, model_utils, train_utils
 from tensorflow.models.rnn import rnn
 
 flags = tf.flags
-#logging = tf.logging
-import logging
-import pickle
-
-flags.DEFINE_string("model", "small", "A type of model. Possible options are: small, medium, large.")
+flags.DEFINE_string("model", None, "A type of model. Possible options are: small, medium, large.")
+flags.DEFINE_string("config_file", None, "Instead of selecting a predefined model, pass options in a config file")
 flags.DEFINE_string("data_dir", "/tmp", "data_dir")
 flags.DEFINE_string("train_dir", "/tmp", "Training directory.")
 flags.DEFINE_string("train_idx", "/tmp/train.ids.en", "Training data (integer-mapped)")
@@ -96,7 +94,6 @@ def log10(x):
 class RNNLMModel(object):
   """The RNNLM model. To use the model in decoding where we need probabilities, pass use_log_probs=True.
   """
-
   def __init__(self, is_training, config, use_log_probs=False):
     self.batch_size = batch_size = config.batch_size
     self.num_steps = num_steps = config.num_steps
@@ -227,228 +224,13 @@ class RNNLMModel(object):
   def log_probs(self):
     return self._log_probs 
 
-class SmallConfig(object):
-  """Small config."""
-  init_scale = 0.1
-  learning_rate = 1.0
-  max_grad_norm = 5
-  num_layers = 2
-  num_steps = 20
-  hidden_size = 200
-  max_epoch = 4
-  max_max_epoch = 13
-  keep_prob = 1.0
-  lr_decay = 0.5
-  batch_size = 20
-  vocab_size = 10000
-
-
-class MediumConfig(object):
-  """Medium config."""
-  init_scale = 0.05
-  learning_rate = 1.0
-  max_grad_norm = 5
-  num_layers = 2
-  num_steps = 35
-  hidden_size = 650
-  max_epoch = 6
-  max_max_epoch = 39
-  keep_prob = 0.5
-  lr_decay = 0.8
-  batch_size = 20
-  vocab_size = 10000
-
-class MediumConfig16k(object):
-  """Medium config."""
-  init_scale = 0.05
-  learning_rate = 1.0
-  max_grad_norm = 5
-  num_layers = 2
-  num_steps = 35
-  hidden_size = 650
-  max_epoch = 6
-  max_max_epoch = 39
-  keep_prob = 0.5
-  lr_decay = 0.8
-  batch_size = 20
-  vocab_size = 16162
-
-class LargeConfig(object):
-  """Large config."""
-  init_scale = 0.04
-  learning_rate = 1.0
-  max_grad_norm = 10
-  num_layers = 2
-  num_steps = 35
-  hidden_size = 1500
-  max_epoch = 14
-  max_max_epoch = 55
-  keep_prob = 0.35
-  lr_decay = 1 / 1.15
-  batch_size = 20
-  vocab_size = 10000
-
-class LargeConfig50k(object):
-  """Large config."""
-  init_scale = 0.04
-  learning_rate = 1.0
-  max_grad_norm = 10
-  num_layers = 2
-  num_steps = 35
-  hidden_size = 1500
-  max_epoch = 14
-  max_max_epoch = 55
-  keep_prob = 0.35
-  lr_decay = 1 / 1.15
-  batch_size = 80
-  vocab_size = 50003
-
-class TestConfig(object):
-  """Tiny config, for testing."""
-  init_scale = 0.1
-  learning_rate = 1.0
-  max_grad_norm = 1
-  num_layers = 1
-  num_steps = 2
-  hidden_size = 2
-  max_epoch = 1
-  max_max_epoch = 1
-  keep_prob = 1.0
-  lr_decay = 0.5
-  batch_size = 20
-  vocab_size = 10000
-
-def run_epoch(session, m, data, eval_op, train=False, start_idx=0, tmpfile=None, 
-              m_valid=None, valid_data=None):
-  """Runs the model on the given data."""
-  epoch_size = ((len(data) // m.batch_size) - 1) // m.num_steps
-  logging.info("Data_size=%s batch_size=%s epoch_size=%s" % (len(data), m.batch_size, epoch_size))
-  start_time = time.time()
-  costs = 0.0
-  iters = 0
-  state = m.initial_state.eval()
-  for step, (x, y) in enumerate(reader.ptb_iterator(data, m.batch_size,
-                                                    m.num_steps, start_idx), start=1+start_idx):
-    cost, state, _ = session.run([m.cost, m.final_state, eval_op],
-                                 {m.input_data: x,
-                                  m.targets: y,
-                                  m.initial_state: state})
-    costs += cost
-    iters += m.num_steps
-    if train and step % 100 == 0:                                                      
-      logging.info("Global step = %i" % m.global_step.eval())
-
-    #if train and step % (epoch_size // 10) == 10:
-    #  logging.info("%.3f perplexity: %.3f speed: %.0f wps" %
-    #        (step * 1.0 / epoch_size, np.exp(costs / iters),
-    #         iters * m.batch_size / (time.time() - start_time)))
-
-    if train and step % FLAGS.steps_per_checkpoint == 0:
-      logging.info("Time: {}".format(datetime.datetime.strftime(datetime.datetime.now(), '%Y-%m-%d %H:%M:%S')))      
-      logging.info("%.3f perplexity: %.3f speed: %.0f wps" %
-            (step * 1.0 / epoch_size, np.exp(costs / iters),
-             iters * m.batch_size / (time.time() - start_time)))
-      # Save train variable
-      with open(tmpfile, "wb") as f:
-        # Training idx = step - 1, so we want to resume from idx = step
-        # If we had already restarted from start_idx, this gives the offset
-        resume_from = step
-        pickle.dump(resume_from, f, pickle.HIGHEST_PROTOCOL)  
-
-      checkpoint_path = os.path.join(FLAGS.train_dir, "rnn.ckpt")
-      finished_idx = step - 1
-      logging.info("Save model to path=%s after training_idx=%s and global_step=%s" % (checkpoint_path, finished_idx, m.global_step.eval()))
-      m.saver.save(session, checkpoint_path, global_step=m.global_step)
-      
-      # Get a random validation batch and evaluate
-      data_len = len(valid_data)
-      batch_len = data_len // m_valid.batch_size
-      epoch_size = (batch_len - 1) // m_valid.num_steps
-      from random import randint
-      rand_idx = randint(0,epoch_size-1)
-      (x_valid, y_valid) = reader.ptb_iterator(valid_data, m_valid.batch_size, m_valid.num_steps, rand_idx).next()
-      cost_valid, _, _ = session.run([m_valid.cost, m_valid.final_state, tf.no_op()],
-                                 {m_valid.input_data: x_valid,
-                                  m_valid.targets: y_valid,
-                                  m_valid.initial_state: m_valid.initial_state.eval()})
-      valid_perplexity = np.exp(cost_valid / m_valid.num_steps)
-      logging.info("Perplexity for random validation index=%i: %.3f" % (rand_idx, valid_perplexity))
-
-  return np.exp(costs / iters)
-
-def run_epoch_eval(session, m, data, eval_op, use_log_probs=False):
-  """Runs the model on the given data."""
-  costs = 0.0
-  iters = 0
-  logp = 0.0
-  wordcn = 0
-  state = m.initial_state.eval()
-  # This feeds one word at a time when batch size and num_steps are both 1
-  for step, (x, y) in enumerate(reader.ptb_iterator(data, m.batch_size,
-                                                    m.num_steps), start=1):                                                      
-    if use_log_probs:
-      log_probs, state = session.run([m.log_probs, m.final_state],
-                                 {m.input_data: x,
-                                  m.initial_state: state})
-      logp += (log_probs[0][y[0]])[0]
-      wordcn += 1
-    else:
-      cost, state, _ = session.run([m.cost, m.final_state, eval_op],
-                                 {m.input_data: x,
-                                  m.targets: y,
-                                  m.initial_state: state})
-      costs += cost
-      iters += m.num_steps
-  
-  if use_log_probs:
-    logging.info("Test log probability={}".format(logp))
-    logging.info("Test PPL: %f", np.exp(-logp/wordcn))
-    return logp
-  else:
-    logging.info("Test PPL: %f", np.exp(costs / iters))
-    return np.exp(costs / iters)
-
-def run_step_eval(session, m, input_word, prev_state):
-  """Runs the model given the previous state and the data.
-  Model must have been created with argument use_log_probs=True."""
-  x = np.zeros([1, 1], dtype=np.int32)
-  x[0] = input_word
-  log_probs, state = session.run([m.log_probs, m.final_state],
-                                 {m.input_data: x,
-                                  m.initial_state: prev_state})
-  return log_probs[0], state
-  
-def score_sentence(session, model, sentence):
-  state = model.initial_state.eval()
-  logp = 0.0
-  wordcn = 0
-  for i in range(len(sentence)-1):
-    posterior, state = run_step_eval(session, model, sentence[i], state)
-    logp += posterior[sentence[i+1]]
-    wordcn += 1
-  logging.info("Test log probability={}".format(logp))
-  logging.info("Test PPL: %f", np.exp(-logp/wordcn))
-  return logp
-
-def get_config(model_config):
-  if model_config == "small":
-    return SmallConfig()
-  elif model_config == "medium":
-    return MediumConfig()
-  elif model_config == "medium16k":
-    return MediumConfig16k()
-  elif model_config == "large":
-    return LargeConfig()
-  elif model_config == "large50k":
-    return LargeConfig50k()
-  elif model_config == "test":
-    return TestConfig()
-  else:
-    raise ValueError("Invalid model: %s", model_config)
-
 def load_model(session, model_config, train_dir, use_log_probs=False):
   # Create and load model for decoding
-  config = get_config(model_config)
+  # If model_config is a path, read config from that path, else treat as config name
+  if os.path.exists(model_config):
+    config = model_utils.read_config(model_config)
+  else:
+    config = model_utils.get_config(model_config)
   config.batch_size = 1
   config.num_steps = 1
   with tf.variable_scope("model", reuse=None):
@@ -499,15 +281,22 @@ def main(_):
         # using log probs or cross entropies gives the same perplexities
         if use_log_probs:
           # Run model as in training, with an iterator over inputs
-          run_epoch_eval(session, model, test_data, tf.no_op(), use_log_probs=use_log_probs)
+          train_utils.run_epoch_eval(session, model, test_data, tf.no_op(), use_log_probs=use_log_probs)
           # Run model step by step (yields the same result)
           #score_sentence(session, model, test_data)      
         else:
-          run_epoch_eval(session, model, test_data, tf.no_op(), use_log_probs=use_log_probs)                
+          train_utils.run_epoch_eval(session, model, test_data, tf.no_op(), use_log_probs=use_log_probs)
     else:
       logging.info("Run model in training mode")
-      config = get_config(FLAGS.model)
-      eval_config = get_config(FLAGS.model)
+      if FLAGS.model:
+        config = model_utils.get_config(FLAGS.model)
+        eval_config = model_utils.get_config(FLAGS.model)
+      elif FLAGS.config_file:
+        config = model_utils.read_config(FLAGS.config_file)
+        eval_config = copy.copy(config)
+      else:
+        logging.error("Must specify either model name or config file.")
+        sys.exit(1)
       eval_config.batch_size = 1
       eval_config.num_steps = 1
 
@@ -554,16 +343,16 @@ def main(_):
 
         logging.info("Epoch: %d Learning rate: %.3f" % (i + 1, session.run(model.lr)))
 
-        train_perplexity = run_epoch(session, model, train_data, model.train_op, train=True, 
-                                   start_idx=start_idx, tmpfile=tmpfile, m_valid=mvalid, valid_data=valid_data)
+        train_perplexity = train_utils.run_epoch(session, model, train_data, model.train_op, FLAGS.train_dir, FLAGS.steps_per_checkpoint,
+                                                 train=True, start_idx=start_idx, tmpfile=tmpfile, m_valid=mvalid, valid_data=valid_data)
         start_idx = 0
         logging.info("Epoch: %d Train Perplexity: %.3f" % (i + 1, train_perplexity))
 
-        valid_perplexity = run_epoch(session, mvalid, valid_data, tf.no_op())
+        valid_perplexity = train_utils.run_epoch(session, mvalid, valid_data, tf.no_op(), FLAGS.train_dir, FLAGS.steps_per_checkpoint)
         logging.info("Epoch: %d Full Valid Perplexity: %.3f" % (i + 1, valid_perplexity))
 
       logging.info("Training finished.")
-      test_perplexity = run_epoch(session, mtest, test_data, tf.no_op())
+      test_perplexity = train_utils.run_epoch(session, mtest, test_data, tf.no_op(), FLAGS.train_dir, FLAGS.steps_per_checkpoint)
       logging.info("Test Perplexity: %.3f" % test_perplexity)
 
       checkpoint_path = os.path.join(FLAGS.train_dir, "rnn.ckpt")
