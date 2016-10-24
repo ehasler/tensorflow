@@ -63,17 +63,18 @@ import pickle
 import copy
 import tensorflow as tf
 
-from tensorflow.models.rnn.ptb import reader, model_utils, train_utils
+from tensorflow.models.rnn.ptb import reader
+from tensorflow.models.rnn.ptb.utils import model_utils, train_utils
 from tensorflow.models.rnn import rnn
 
 flags = tf.flags
 flags.DEFINE_string("model", None, "A type of model. Possible options are: small, medium, large.")
 flags.DEFINE_string("config_file", None, "Instead of selecting a predefined model, pass options in a config file")
-flags.DEFINE_string("data_dir", "/tmp", "data_dir")
+flags.DEFINE_string("data_dir", None, "Path to dir containing PTB training data")
 flags.DEFINE_string("train_dir", "/tmp", "Training directory.")
-flags.DEFINE_string("train_idx", "/tmp/train.ids.en", "Training data (integer-mapped)")
-flags.DEFINE_string("dev_idx", "/tmp/dev.ids.en", "Development data (integer-mapped)")                  
-flags.DEFINE_string("test_idx", "/tmp/test.ids.en", "Test data (integer-mapped)")                   
+flags.DEFINE_string("train_idx", None, "Path to training data (integer-mapped)")
+flags.DEFINE_string("dev_idx", None, "Path to development data (integer-mapped)")
+flags.DEFINE_string("test_idx", None, "Path to test data (integer-mapped)")
 flags.DEFINE_integer("max_train_data_size", 0, "Limit on the size of training data (0: no limit).") 
 flags.DEFINE_string("device", None, "Device to be used")
 flags.DEFINE_boolean("use_adadelta", False, "Use AdaDelta instead of GradientDescent")
@@ -246,8 +247,8 @@ def load_model(session, model_config, train_dir, use_log_probs=False):
   return model, config
 
 def main(_):
-  if not FLAGS.data_dir:
-    raise ValueError("Must set --data_dir to PTB data directory")
+  if not FLAGS.data_dir and (not FLAGS.train_idx or not FLAGS.dev_idx or not FLAGS.test_idx):
+    raise ValueError("Must set --data_dir to PTB data directory or specify data using --train_idx,--dev_idx,--test_idx")
 
   logging.getLogger().setLevel(logging.INFO)
   logging.info("Start: {}".format(datetime.datetime.strftime(datetime.datetime.now(), '%Y-%m-%d %H:%M:%S')))
@@ -300,11 +301,13 @@ def main(_):
       eval_config.batch_size = 1
       eval_config.num_steps = 1
 
-      #raw_data = reader.ptb_raw_data(FLAGS.data_dir)
-      #train_data, valid_data, test_data, _ = raw_data
-      train_data = reader.read_indexed_data(FLAGS.train_idx, FLAGS.max_train_data_size, config.vocab_size)
-      valid_data = reader.read_indexed_data(FLAGS.dev_idx, vocab_size=config.vocab_size)
-      test_data = reader.read_indexed_data(FLAGS.test_idx, vocab_size=config.vocab_size)
+      if FLAGS.data_dir:
+        raw_data = reader.ptb_raw_data(FLAGS.data_dir)
+        train_data, valid_data, test_data, _ = raw_data
+      else:
+        train_data = reader.read_indexed_data(FLAGS.train_idx, FLAGS.max_train_data_size, config.vocab_size)
+        valid_data = reader.read_indexed_data(FLAGS.dev_idx, vocab_size=config.vocab_size)
+        test_data = reader.read_indexed_data(FLAGS.test_idx, vocab_size=config.vocab_size)
 
       if FLAGS.use_adagrad:
         config.learning_rate = 0.5

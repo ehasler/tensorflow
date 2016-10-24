@@ -16,7 +16,7 @@ def read_config(config_file, config):
   def str2bool(v):
     return v.lower() in ('true', 't')  
   
-  if not os.path.isfile(config_file):
+  if not config_file or not os.path.isfile(config_file):
     logging.error("Cannot load config file %s" % config_file)
     exit(1)
   logging.info("Settings from tensorflow config file:")    

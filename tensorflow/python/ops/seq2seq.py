@@ -71,7 +71,6 @@ from tensorflow.python.ops import nn_ops
 from tensorflow.python.ops import rnn
 from tensorflow.python.ops import rnn_cell
 from tensorflow.python.ops import variable_scope
-from tensorflow.models.rnn.translate.seq2seq.wrapper_cells import BOWCell
 
 from tensorflow.python.ops.math_ops import tanh
 
@@ -547,6 +546,7 @@ def attention_decoder(decoder_inputs, initial_state, attention_states, cell,
           s = s * src_mask
         a = nn_ops.softmax(s)
 
+        from tensorflow.models.rnn.translate.seq2seq.wrapper_cells import BOWCell
         if isinstance(cell, BOWCell) and \
           (is_LSTM_cell(cell.get_cell()) or \
            (isinstance(cell.get_cell(), rnn_cell.MultiRNNCell) and \
