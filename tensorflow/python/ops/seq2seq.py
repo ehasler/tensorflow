@@ -630,6 +630,7 @@ def attention_decoder(decoder_inputs,
           s = s * src_mask
         a = nn_ops.softmax(s)
 
+        from tensorflow.models.rnn.translate.seq2seq.wrapper_cells import BOWCell
         if isinstance(cell, BOWCell) and \
           (is_LSTM_cell(cell.get_cell()) or \
            (isinstance(cell.get_cell(), rnn_cell.MultiRNNCell) and \

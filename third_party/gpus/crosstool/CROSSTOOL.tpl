@@ -89,6 +89,7 @@ toolchain {
   compiler_flag: "-D_FORTIFY_SOURCE=1"
   compiler_flag: "-fstack-protector"
   compiler_flag: "-fPIE"
+  compiler_flag: "-fPIC"
   linker_flag: "-pie"
   linker_flag: "-Wl,-z,relro,-z,now"
 

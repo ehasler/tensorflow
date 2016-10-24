@@ -14,7 +14,10 @@ py_library(
     ],
     srcs_version = "PY2AND3",
     deps = [
+	":ptb_word_lm"
         ":reader",
+	"//tensorflow/models/rnn/ptb/utils:train_utils",
+        "//tensorflow/models/rnn/ptb/utils:model_utils",
     ],
 )
 
@@ -44,6 +47,8 @@ py_binary(
     srcs_version = "PY2AND3",
     deps = [
         ":reader",
+	"//tensorflow/models/rnn/ptb/utils:model_utils",
+	"//tensorflow/models/rnn/ptb/utils:train_utils",
         "//tensorflow:tensorflow_py",
     ],
 )

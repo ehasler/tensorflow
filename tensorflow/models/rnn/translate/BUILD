@@ -14,41 +14,42 @@ py_library(
     ],
     srcs_version = "PY2AND3",
     deps = [
-        ":data_utils",
-        ":seq2seq_model",
+        "//tensorflow/models/rnn/translate/utils:data_utils",
+        "//tensorflow/models/rnn/translate/utils:train_utils",
+        "//tensorflow/models/rnn/translate/utils:model_utils",
+        "//tensorflow/models/rnn/translate/seq2seq:seq2seq_model",
+        "//tensorflow/models/rnn/translate/seq2seq:engine",
+        "//tensorflow/models/rnn/translate/seq2seq:tf_seq2seq",
+        "//tensorflow/models/rnn/translate/seq2seq:wrapper_cells",
+	":train",
+	":decode",
     ],
 )
 
-py_library(
-    name = "data_utils",
+py_binary(
+    name = "train",
     srcs = [
-        "data_utils.py",
-    ],
-    srcs_version = "PY2AND3",
-    deps = ["//tensorflow:tensorflow_py"],
-)
-
-py_library(
-    name = "seq2seq_model",
-    srcs = [
-        "seq2seq_model.py",
+        "train.py",
     ],
     srcs_version = "PY2AND3",
     deps = [
-        ":data_utils",
+        "//tensorflow/models/rnn/translate/utils:data_utils",
+        "//tensorflow/models/rnn/translate/utils:train_utils",
+        "//tensorflow/models/rnn/translate/utils:model_utils",
         "//tensorflow:tensorflow_py",
     ],
 )
 
 py_binary(
-    name = "translate",
+    name = "decode",
     srcs = [
-        "translate.py",
+        "decode.py",
     ],
     srcs_version = "PY2AND3",
     deps = [
-        ":data_utils",
-        ":seq2seq_model",
+        "//tensorflow/models/rnn/translate:train",
+        "//tensorflow/models/rnn/translate/utils:data_utils",
+        "//tensorflow/models/rnn/translate/utils:model_utils",
         "//tensorflow:tensorflow_py",
     ],
 )
@@ -57,16 +58,17 @@ py_test(
     name = "translate_test",
     size = "medium",
     srcs = [
-        "translate.py",
+        "train.py",
     ],
     args = [
         "--self_test=True",
     ],
-    main = "translate.py",
+    main = "train.py",
     srcs_version = "PY2AND3",
     deps = [
-        ":data_utils",
-        ":seq2seq_model",
+        "//tensorflow/models/rnn/translate/utils:data_utils",
+        "//tensorflow/models/rnn/translate/utils:train_utils",
+        "//tensorflow/models/rnn/translate/utils:model_utils",
         "//tensorflow:tensorflow_py",
     ],
 )

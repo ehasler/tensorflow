@@ -46,6 +46,36 @@ class MediumConfig16k(object):
   batch_size = 20
   vocab_size = 16162
 
+class MediumConfigCharsOld(object):
+  """Medium config."""
+  init_scale = 0.05
+  learning_rate = 1.0
+  max_grad_norm = 5
+  num_layers = 2
+  num_steps = 35
+  hidden_size = 650
+  max_epoch = 6
+  max_max_epoch = 39
+  keep_prob = 0.5
+  lr_decay = 0.8
+  batch_size = 20
+  vocab_size = 90
+  
+class MediumConfigChars(object):
+  """Medium config."""
+  init_scale = 0.05
+  learning_rate = 1.0
+  max_grad_norm = 5
+  num_layers = 2
+  num_steps = 100
+  hidden_size = 1000
+  max_epoch = 1
+  max_max_epoch = 15
+  keep_prob = 0.5
+  lr_decay = 0.8
+  batch_size = 20
+  vocab_size = 90  
+
 class LargeConfig(object):
   """Large config."""
   init_scale = 0.04
@@ -98,6 +128,8 @@ def get_config(model_config):
     return MediumConfig()
   elif model_config == "medium16k":
     return MediumConfig16k()
+  elif model_config == "medium_chars":
+    return MediumConfigChars()
   elif model_config == "large":
     return LargeConfig()
   elif model_config == "large50k":
