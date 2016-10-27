@@ -1,5 +1,8 @@
-import re
+import re, os
 import logging
+import tensorflow as tf
+
+from tensorflow.models.rnn.ptb.rnnlm import RNNLMModel
 
 class Config(object): pass
 
@@ -139,3 +142,42 @@ def read_config(config_file):
       setattr(config, key, value)
       logging.info("{}: {}".format(key, value))
   return config
+
+def create_model(session, config, eval_config, train_dir, optimizer):
+  initializer = tf.random_uniform_initializer(-config.init_scale, config.init_scale)
+  with tf.variable_scope("model", reuse=None, initializer=initializer):
+    model = RNNLMModel(is_training=True, config=config, optimizer=optimizer)
+  with tf.variable_scope("model", reuse=True, initializer=initializer):
+    mvalid = RNNLMModel(is_training=False, config=config)
+    mtest = RNNLMModel(is_training=False, config=eval_config)
+
+  ckpt = tf.train.get_checkpoint_state(train_dir)
+  if ckpt and tf.gfile.Exists(ckpt.model_checkpoint_path):
+    logging.info("Reading model parameters from %s" % ckpt.model_checkpoint_path)
+    model.saver.restore(session, ckpt.model_checkpoint_path)
+  else:
+    logging.info("Created model with fresh parameters.")
+    session.run(tf.initialize_all_variables())
+  return model, mvalid, mtest
+
+def load_model(session, model_config, train_dir, use_log_probs=False):
+  # Create and load model for decoding
+  # If model_config is a path, read config from that path, else treat as config name
+  if os.path.exists(model_config):
+    config = read_config(model_config)
+  else:
+    config = get_config(model_config)
+  config.batch_size = 1
+  config.num_steps = 1
+
+  with tf.variable_scope("model", reuse=None):
+    model = RNNLMModel(is_training=False, config=config, use_log_probs=use_log_probs)
+
+  ckpt = tf.train.get_checkpoint_state(train_dir)
+  if ckpt and tf.gfile.Exists(ckpt.model_checkpoint_path):
+    logging.info("Reading model parameters from %s" % ckpt.model_checkpoint_path)
+    model.saver.restore(session, ckpt.model_checkpoint_path)
+  else:
+    logging.error("Could not find model in directory %s." % train_dir)
+    exit(1)
+  return model, config

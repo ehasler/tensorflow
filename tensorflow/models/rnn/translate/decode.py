@@ -49,7 +49,7 @@ def decode(config, input=None, output=None, max_sentences=0):
 
   with tf.Session() as session:
     # Create model and load parameters: uses the training graph for decoding
-    model, _ = model_utils.create_model(config, session, forward_only=True)
+    model, _ = model_utils.create_model(session, config, forward_only=True)
     model.batch_size = 1  # We decode one sentence at a time.
 
     # Decode input file
@@ -79,7 +79,7 @@ def decode(config, input=None, output=None, max_sentences=0):
 def decode_interactive(config):
   with tf.Session() as session:
     # Create model and load parameters: uses the training graph for decoding
-    model, _ = model_utils.create_model(config, session, forward_only=True)
+    model, _ = model_utils.create_model(session, config, forward_only=True)
     model.batch_size = 1  # We decode one sentence at a time.
 
     # Decode from standard input.
