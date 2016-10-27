@@ -395,15 +395,15 @@ def read_data(buckets, source_path, target_path, max_size=None, src_vcb_size=Non
         target_ids.append(EOS_ID)
 
         if src_vcb_size:
-          # replace source OOV words with unk (in case this has not been done on the source side)
+          # Replace source OOV words with unk (in case this has not been done on the source side)
           source_ids = [ wid if wid < src_vcb_size else UNK_ID for wid in source_ids ]
 
         if trg_vcb_size:
-          # replace target OOV words with unk (in case this has not been done on the target side)
+          # Replace target OOV words with unk (in case this has not been done on the target side)
           target_ids = [ wid if wid < trg_vcb_size else UNK_ID for wid in target_ids ]
 
         for bucket_id, (source_size, target_size) in enumerate(buckets):
-          #if len(source_ids) < source_size and len(target_ids) < target_size:
+          # Target will get additional GO symbol
           if len(source_ids) <= source_size and len(target_ids) < target_size:
             data_set[bucket_id].append([source_ids, target_ids])
             break

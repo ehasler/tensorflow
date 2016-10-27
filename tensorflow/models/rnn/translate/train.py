@@ -53,10 +53,10 @@ tf.app.flags.DEFINE_boolean("self_test", False, "Run a self-test if this is set 
 # Dev evaluation settings
 tf.app.flags.DEFINE_integer("eval_frequency", 6, "How often performance should be evaluated on dev batches relative to checkpoints (default: evaluate every 6 checkpoints)")
 tf.app.flags.DEFINE_boolean("eval_random", True, "If True, choose eval examples at random from each bucket, otherwise read sequentially")
-tf.app.flags.DEFINE_integer("eval_size", 80, "Number of examples to evaluate in each bucket. If set to -1, evaluate on all examples in each bucket. This setting is only "
+tf.app.flags.DEFINE_integer("eval_size", 80, "The number of examples to evaluate in each bucket. If set to -1, evaluate on all examples in each bucket. This setting is only "
                             "used when random_eval=False.")
 tf.app.flags.DEFINE_boolean("eval_bleu", False, "If True, decode dev set and measure BLEU instead of measuring perplexities")
-tf.app.flags.DEFINE_integer("eval_bleu_max_sents", 0, "The maximum number of dev sentences to translate (all if set to 0)")
+tf.app.flags.DEFINE_integer("eval_bleu_size", 0, "The number of dev sentences to translate (all if set to 0)")
 tf.app.flags.DEFINE_integer("eval_bleu_start", 10000, "Number of batches before starting BLEU evaluation on dev")
 
 # Model configuration
@@ -68,8 +68,8 @@ tf.app.flags.DEFINE_integer("hidden_size", 1000, "Size of the hidden model layer
 tf.app.flags.DEFINE_integer("num_layers", 1, "Number of layers in the model.")
 tf.app.flags.DEFINE_integer("num_samples", 512, "Number of samples if using sampled softmax (0 to not use it).")
 tf.app.flags.DEFINE_boolean("norm_digits", False, "Normalise all digits to 0s")
-tf.app.flags.DEFINE_boolean("use_seqlen", False, "Use sequence length for encoder inputs.")
-tf.app.flags.DEFINE_boolean("use_src_mask", False, "Use source mask over for decoder attentions.")
+tf.app.flags.DEFINE_boolean("use_seqlen", True, "Use sequence length for encoder inputs.")
+tf.app.flags.DEFINE_boolean("use_src_mask", True, "Use source mask over for decoder attentions.")
 tf.app.flags.DEFINE_boolean("maxout_layer", False, "If > 0, use a maxout layer of given size and full softmax instead of sampled softmax")
 tf.app.flags.DEFINE_string("encoder", "reverse", "Select encoder from 'reverse', 'bidirectional', 'bow'. The 'reverse' encoder is unidirectional and reverses the input "
                             "(default for tensorflow), the bidirectional encoder creates both forward and backward states and "

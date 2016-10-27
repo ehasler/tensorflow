@@ -234,7 +234,7 @@ def decode_dev(config, model, previous_bleus):
   g2 = tf.Graph() # use a separate graph to avoid variable collision when loading model for decoding
   with g2.as_default() as g:
     from tensorflow.models.rnn.translate.decode import decode
-    decode(config, input=inp, output=out, max_sentences=config['eval_bleu_max_sents'])
+    decode(config, input=inp, output=out, max_sentences=config['eval_bleu_size'])
   bleu = eval_set(out, ref)
 
   # If the current model improves over the results of the previous dev eval, overwrite the dev_bleu model
