@@ -7,6 +7,7 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
+import sys
 import numpy as np
 import datetime
 import logging
@@ -22,6 +23,7 @@ from tensorflow.models.rnn.translate.utils import data_utils, model_utils
 tf.app.flags.DEFINE_string("test_src_idx", "/tmp/in.txt", "An integer-encoded input file")
 tf.app.flags.DEFINE_string("test_out_idx", "/tmp/out.txt", "Output file for decoder output")
 tf.app.flags.DEFINE_integer("max_sentences", 0, "The maximum number of sentences to translate (all if set to 0)")
+tf.app.flags.DEFINE_boolean("interactive", False, "Decode from command line")
 FLAGS = tf.app.flags.FLAGS
 
 def decode(config, input=None, output=None, max_sentences=0):
@@ -61,28 +63,7 @@ def decode(config, input=None, output=None, max_sentences=0):
     logging.info("Start decoding, max_sentences=%i" % max_sents)
     with open(inp) as f_in, open(out, 'w') as f_out:
       for sentence in f_in:
-        # Get token-ids for the input sentence.
-        token_ids = [ int(tok) for tok in sentence.strip().split() ]
-        token_ids = [ w if w < config['src_vocab_size'] else data_utils.UNK_ID
-                      for w in token_ids ]
-        if config['add_src_eos']:
-          token_ids.append(data_utils.EOS_ID)
-        bucket_id = min([b for b in xrange(len(model_utils._buckets))
-                        if model_utils._buckets[b][0] >= len(token_ids)])
-        logging.info("Bucket {}".format(model_utils._buckets[bucket_id]))
-        logging.info("Input: {}".format(token_ids))
-
-        # Get a 1-element batch to feed the sentence to the model.
-        encoder_inputs, decoder_inputs, target_weights, sequence_length, src_mask, bow_mask = model.get_batch(
-          {bucket_id: [(token_ids, [])]}, bucket_id, config['encoder'])
-
-        # Get output logits for the sentence.
-        _, _, output_logits = model.step(session, encoder_inputs, decoder_inputs,
-                                       target_weights, bucket_id, forward_only=True,
-                                       sequence_length=sequence_length, src_mask=src_mask, bow_mask=bow_mask)
-
-        # This is a greedy decoder - outputs are just argmaxes of output_logits.
-        outputs = [int(np.argmax(logit, axis=1)) for logit in output_logits]
+        outputs = get_outputs(session, config, model, sentence)
         logging.info("Output: {}".format(outputs))
 
         # If there is an EOS symbol in outputs, cut them at that point.
@@ -95,9 +76,55 @@ def decode(config, input=None, output=None, max_sentences=0):
           break
       logging.info("Decoding completed.")
 
+def decode_interactive(config):
+  with tf.Session() as session:
+    # Create model and load parameters: uses the training graph for decoding
+    model, _ = model_utils.create_model(config, session, forward_only=True)
+    model.batch_size = 1  # We decode one sentence at a time.
+
+    # Decode from standard input.
+    sys.stdout.write("> ")
+    sys.stdout.flush()
+    sentence = sys.stdin.readline()
+    while sentence:
+      outputs = get_outputs(session, config, model, sentence)
+      print("Output: %s" % " ".join([str(tok) for tok in outputs]))
+      print("> ", end="")
+      sys.stdout.flush()
+      sentence = sys.stdin.readline()
+
+def get_outputs(session, config, model, sentence):
+  # Get token-ids for the input sentence.
+  token_ids = [ int(tok) for tok in sentence.strip().split() ]
+  token_ids = [ w if w < config['src_vocab_size'] else data_utils.UNK_ID
+                for w in token_ids ]
+  if config['add_src_eos']:
+    token_ids.append(data_utils.EOS_ID)
+
+  bucket_id = min([b for b in xrange(len(model_utils._buckets))
+                  if model_utils._buckets[b][0] >= len(token_ids)])
+  logging.info("Bucket {}".format(model_utils._buckets[bucket_id]))
+  logging.info("Input: {}".format(token_ids))
+
+  # Get a 1-element batch to feed the sentence to the model.
+  encoder_inputs, decoder_inputs, target_weights, sequence_length, src_mask, bow_mask = model.get_batch(
+    {bucket_id: [(token_ids, [])]}, bucket_id, config['encoder'])
+
+  # Get output logits for the sentence.
+  _, _, output_logits = model.step(session, encoder_inputs, decoder_inputs,
+                                 target_weights, bucket_id, forward_only=True,
+                                 sequence_length=sequence_length, src_mask=src_mask, bow_mask=bow_mask)
+
+  # This is a greedy decoder - outputs are just argmaxes of output_logits.
+  outputs = [int(np.argmax(logit, axis=1)) for logit in output_logits]
+  return outputs
+
 def main(_):
-  config = model_utils.process_args(FLAGS, greedy_decoder=True)
-  decode(config)
+  config = model_utils.process_args(FLAGS, train=False, greedy_decoder=True)
+  if FLAGS.interactive:
+    decode_interactive(config)
+  else:
+    decode(config)
 
 if __name__ == "__main__":
   logging.getLogger().setLevel(logging.INFO)

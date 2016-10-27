@@ -34,7 +34,7 @@ def read_config(config_file, config):
       config[key] = value
       logging.info("{}: {}".format(key, value))
 
-def process_args(FLAGS, greedy_decoder=False):
+def process_args(FLAGS, train=True, greedy_decoder=False):
   config = dict()
 
   # First read command line flags
@@ -49,7 +49,8 @@ def process_args(FLAGS, greedy_decoder=False):
     raise Exception("Unknown optimization algorithm: {}".format(config['opt_algorithm']))
   if config['num_symm_buckets'] > 0:
     global _buckets
-    _buckets = make_buckets(config['num_symm_buckets'], config['max_sequence_length'], greedy_decoder=greedy_decoder)
+    _buckets = make_buckets(config['num_symm_buckets'], config['max_sequence_length'],
+                            config['add_src_eos'], train, greedy_decoder)
 
   if config['no_pad_symbol']:
     data_utils.no_pad_symbol()
@@ -58,18 +59,20 @@ def process_args(FLAGS, greedy_decoder=False):
     
   return config
 
-def make_buckets(num_buckets, max_seq_len=50, train=True, greedy_decoder=False):
+def make_buckets(num_buckets, max_seq_len=50, add_src_eos=True, train=True, greedy_decoder=False):
+  # Bucket length: +1 for EOS, +1 for GO symbol
+  src_offset = 0 if not add_src_eos else 1
   if train:
-    # Buckets for training: +2 for EOS and GO symbols
-    buckets = [ (int(max_seq_len/num_buckets)*i, int(max_seq_len/num_buckets)*i + 2) for i in range(1,num_buckets+1) ]
+    # Buckets for training
+    buckets = [ (int(max_seq_len/num_buckets)*i + src_offset, int(max_seq_len/num_buckets)*i + 2) for i in range(1,num_buckets+1) ]
   else:
     if greedy_decoder:
-      # Buckets for decoding with training graph (tensorflow greedy decoder)
-      buckets = [ (int(max_seq_len/num_buckets)*i, int(max_seq_len/num_buckets)*i + 5) for i in range(1,num_buckets+1) ]
+      # Buckets for decoding with training graph (greedy decoder)
+      buckets = [ (int(max_seq_len/num_buckets)*i + src_offset, int(max_seq_len/num_buckets)*i + 5) for i in range(1,num_buckets+1) ]
     else:
-      # Buckets for decoding with decoding graph: input length=1 on the target side)
-      buckets = [ (int(max_seq_len/num_buckets)*i, 1) for i in range(1,num_buckets+1) ]
-    
+      # Buckets for decoding with single-step decoding graph: input length=1 on the target side)
+      buckets = [ (int(max_seq_len/num_buckets)*i + src_offset, 1) for i in range(1,num_buckets+1) ]
+
   logging.info("Use buckets={}".format(buckets))
   return buckets
 
@@ -78,7 +81,7 @@ def make_bucket(src_length, greedy_decoder=False):
     # Additional bucket for decoding with training graph
     return (src_length, src_length + 5)
   else:
-    # Additional bucket for decoding with decoding graph: input length=1 on the target side)
+    # Additional bucket for decoding with single-step decoding graph: input length=1 on the target side)
     return (src_length, 1)
 
 def get_singlestep_Seq2SeqModel(config, buckets):

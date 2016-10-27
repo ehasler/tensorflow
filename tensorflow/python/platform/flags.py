@@ -19,6 +19,7 @@ from __future__ import division
 from __future__ import print_function
 
 import argparse
+import logging
 
 _global_parser = argparse.ArgumentParser()
 
@@ -30,7 +31,10 @@ class _FlagValues(object):
     self.__dict__['__parsed'] = False
 
   def _parse_flags(self):
-    result, _ = _global_parser.parse_known_args()
+    result, unknown_args = _global_parser.parse_known_args()
+    if unknown_args:
+      logging.error("Unknown arguments: {}".format(unknown_args))
+      exit(1)
     for flag_name, val in vars(result).items():
       self.__dict__['__flags'][flag_name] = val
     self.__dict__['__parsed'] = True

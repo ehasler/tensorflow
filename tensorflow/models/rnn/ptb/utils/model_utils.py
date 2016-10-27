@@ -1,6 +1,8 @@
 import re
 import logging
 
+class Config(object): pass
+
 class SmallConfig(object):
   """Small config."""
   init_scale = 0.1
@@ -32,7 +34,7 @@ class MediumConfig(object):
   vocab_size = 10000
 
 class MediumConfig16k(object):
-  """Medium config."""
+  """Medium config with 16k vocab."""
   init_scale = 0.05
   learning_rate = 1.0
   max_grad_norm = 5
@@ -46,23 +48,8 @@ class MediumConfig16k(object):
   batch_size = 20
   vocab_size = 16162
 
-class MediumConfigCharsOld(object):
-  """Medium config."""
-  init_scale = 0.05
-  learning_rate = 1.0
-  max_grad_norm = 5
-  num_layers = 2
-  num_steps = 35
-  hidden_size = 650
-  max_epoch = 6
-  max_max_epoch = 39
-  keep_prob = 0.5
-  lr_decay = 0.8
-  batch_size = 20
-  vocab_size = 90
-  
 class MediumConfigChars(object):
-  """Medium config."""
+  """Config for character rnnlm."""
   init_scale = 0.05
   learning_rate = 1.0
   max_grad_norm = 5
@@ -140,7 +127,7 @@ def get_config(model_config):
     raise ValueError("Invalid model: %s", model_config)
 
 def read_config(config_file):
-  config = SmallConfig()
+  config = Config()
   logging.info("Settings from tensorflow config file:")  
   with open(config_file) as f:
     for line in f:
@@ -149,6 +136,6 @@ def read_config(config_file):
         value = int(value)
       elif re.match("^[\d\.]+$", value):
         value = float(value)
-      config.key = value
+      setattr(config, key, value)
       logging.info("{}: {}".format(key, value))
   return config
