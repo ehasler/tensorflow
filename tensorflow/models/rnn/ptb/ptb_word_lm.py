@@ -56,7 +56,7 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
-import sys, os
+import os
 import datetime
 import logging
 import pickle
@@ -65,7 +65,6 @@ import tensorflow as tf
 
 from tensorflow.models.rnn.ptb import reader
 from tensorflow.models.rnn.ptb.utils import model_utils, train_utils
-from tensorflow.models.rnn import rnn
 
 flags = tf.flags
 flags.DEFINE_string("model", None, "A type of model. Possible options are: small, medium, large.")
@@ -77,174 +76,12 @@ flags.DEFINE_string("dev_idx", None, "Path to development data (integer-mapped)"
 flags.DEFINE_string("test_idx", None, "Path to test data (integer-mapped)")
 flags.DEFINE_integer("max_train_data_size", 0, "Limit on the size of training data (0: no limit).") 
 flags.DEFINE_string("device", None, "Device to be used")
-flags.DEFINE_boolean("use_adadelta", False, "Use AdaDelta instead of GradientDescent")
-flags.DEFINE_boolean("use_adagrad", False, "Use AdaGrad instead of GradientDescent")
-flags.DEFINE_boolean("use_adam", False, "Use Adam instead of GradientDescent")
-flags.DEFINE_boolean("use_rmsprop", False, "Use RmsProp instead of GradientDescent")
+flags.DEFINE_string("optimizer", "sgd", "Optimizer: sgd/adadelta/adagrad/adam/rmsprop (default: sgd)")
 flags.DEFINE_integer("steps_per_checkpoint", 200, "How many training steps to do per checkpoint.")
 flags.DEFINE_boolean("score", False, "Run rnnlm on test sentence and report logprobs")
 flags.DEFINE_boolean("fixed_random_seed", False, "If True, use a fixed random seed to make training reproducible (affects matrix initialization)")
 
 FLAGS = flags.FLAGS
-
-def log10(x):
-  numerator = tf.log(x)
-  denominator = tf.log(tf.constant(10, dtype=numerator.dtype))
-  return numerator / denominator
-
-class RNNLMModel(object):
-  """The RNNLM model. To use the model in decoding where we need probabilities, pass use_log_probs=True.
-  """
-  def __init__(self, is_training, config, use_log_probs=False):
-    self.batch_size = batch_size = config.batch_size
-    self.num_steps = num_steps = config.num_steps
-    hidden_size = config.hidden_size
-    vocab_size = config.vocab_size
-
-    self._input_data = tf.placeholder(tf.int32, [batch_size, num_steps])
-    self._targets = tf.placeholder(tf.int32, [batch_size, num_steps])
-
-    self.global_step = tf.Variable(0, trainable=False)
-
-    # Slightly better results can be obtained with forget gate biases
-    # initialized to 1 but the hyperparameters of the model would need to be
-    # different than reported in the paper.
-    lstm_cell = tf.nn.rnn_cell.BasicLSTMCell(hidden_size, forget_bias=0.0)
-    if is_training and config.keep_prob < 1:
-      lstm_cell = tf.nn.rnn_cell.DropoutWrapper(
-          lstm_cell, output_keep_prob=config.keep_prob)
-    cell = tf.nn.rnn_cell.MultiRNNCell([lstm_cell] * config.num_layers)
-    
-    if is_training or use_log_probs:
-      logging.info("Using LSTM cells of size={}".format(hidden_size))
-      logging.info("Model with %d layer(s)" % config.num_layers)
-      logging.info("Model with %i unrolled step(s)" % config.num_steps)
-
-    self._initial_state = cell.zero_state(batch_size, tf.float32)
-
-    with tf.device("/cpu:0"):
-      embedding = tf.get_variable("embedding", [vocab_size, hidden_size])
-      inputs = tf.nn.embedding_lookup(embedding, self._input_data)
-
-    if is_training and config.keep_prob < 1:
-      inputs = tf.nn.dropout(inputs, config.keep_prob)
-
-    outputs = []
-    state = self._initial_state
-    # Simplified version of tensorflow.models.rnn.rnn.py's rnn().
-    # This builds an unrolled LSTM for tutorial purposes only.
-    # In general, use the rnn() or state_saving_rnn() from rnn.py.
-    #with tf.variable_scope("RNN"):
-    #  for time_step in range(num_steps):
-    #    if time_step > 0: tf.get_variable_scope().reuse_variables()
-    #    (cell_output, state) = cell(inputs[:, time_step, :], state)
-    #    outputs.append(cell_output)
-    inputs = [tf.squeeze(input_, [1])
-              for input_ in tf.split(1, num_steps, inputs)]
-    outputs, state = rnn.rnn(cell, inputs, initial_state=self._initial_state)
-    self._final_state = state
-
-    output = tf.reshape(tf.concat(1, outputs), [-1, hidden_size])
-    softmax_w = tf.get_variable("softmax_w", [hidden_size, vocab_size])
-    softmax_b = tf.get_variable("softmax_b", [vocab_size])
-    logits = tf.matmul(output, softmax_w) + softmax_b
-    
-    if use_log_probs:
-      logging.info("Softmax")
-      probs = tf.nn.softmax(logits)
-      self._log_probs = tf.log(probs)
-    else:
-      loss = tf.nn.seq2seq.sequence_loss_by_example(
-        [logits],
-        [tf.reshape(self._targets, [-1])],
-        [tf.ones([batch_size * num_steps])])
-      self._cost = cost = tf.reduce_sum(loss) / batch_size
-
-    if is_training:
-      self._lr = tf.Variable(0.0, trainable=False)
-      tvars = tf.trainable_variables()
-      grads, _ = tf.clip_by_global_norm(tf.gradients(cost, tvars),
-                                        config.max_grad_norm)
-      if FLAGS.use_adadelta:
-        lr = 1.0
-        rho = 0.95
-        epsilon = 1e-6
-        logging.info("Use AdaDeltaOptimizer with lr={}".format(lr))
-        optimizer = tf.train.AdadeltaOptimizer(lr, rho=rho, epsilon=epsilon)
-      elif FLAGS.use_adagrad:
-        logging.info("Use AdaGradOptimizer with lr={}".format(self.lr))
-        optimizer = tf.train.AdagradOptimizer(self.lr)
-      elif FLAGS.use_adam:
-        # default values are same as in Keras library
-        logging.info("Use AdamOptimizer with default values")
-        optimizer = tf.train.AdamOptimizer()
-      elif FLAGS.use_rmsprop:
-        lr = 0.5
-        logging.info ("Use RMSPropOptimizer with lr={}".format(lr))
-        optimizer = tf.train.RMSPropOptimizer(self.lr)
-      else:
-        logging.info("Use GradientDescentOptimizer")
-        optimizer = tf.train.GradientDescentOptimizer(self.lr)
-      self._train_op = optimizer.apply_gradients(zip(grads, tvars), global_step=self.global_step)
-    
-    variable_prefix = "model"
-    self.saver = tf.train.Saver({ v.op.name: v for v in tf.all_variables() if v.op.name.startswith(variable_prefix) })
-
-  def assign_lr(self, session, lr_value):
-    session.run(tf.assign(self.lr, lr_value))
-
-  @property
-  def input_data(self):
-    return self._input_data
-
-  @property
-  def targets(self):
-    return self._targets
-
-  @property
-  def initial_state(self):
-    return self._initial_state
-
-  @property
-  def cost(self):
-    return self._cost
-
-  @property
-  def final_state(self):
-    return self._final_state
-
-  @property
-  def lr(self):
-    return self._lr
-
-  @property
-  def train_op(self):
-    return self._train_op
-    
-  @property
-  def log_probs(self):
-    return self._log_probs 
-
-def load_model(session, model_config, train_dir, use_log_probs=False):
-  # Create and load model for decoding
-  # If model_config is a path, read config from that path, else treat as config name
-  if os.path.exists(model_config):
-    config = model_utils.read_config(model_config)
-  else:
-    config = model_utils.get_config(model_config)
-  config.batch_size = 1
-  config.num_steps = 1
-  with tf.variable_scope("model", reuse=None):
-    model = RNNLMModel(is_training=False, config=config, use_log_probs=use_log_probs)
-
-  ckpt = tf.train.get_checkpoint_state(train_dir)
-  if ckpt and tf.gfile.Exists(ckpt.model_checkpoint_path):
-    logging.info("Reading model parameters from %s" % ckpt.model_checkpoint_path)
-    model.saver.restore(session, ckpt.model_checkpoint_path)
-  else:
-    logging.error("Could not find model in directory %s." % train_dir)
-    sys.exit(1)
-  return model, config
 
 def main(_):
   if not FLAGS.data_dir and (not FLAGS.train_idx or not FLAGS.dev_idx or not FLAGS.test_idx):
@@ -264,10 +101,10 @@ def main(_):
     as session, tf.device(device):
       
     if FLAGS.score:
-      use_log_probs = True
       logging.info("Run model in scoring mode")
+      use_log_probs = True
       train_dir = "train.rnn.de"
-      model, _ = load_model(session, "large50k", train_dir, use_log_probs)
+      model, _ = model_utils.load_model(session, "large50k", train_dir, use_log_probs)
 
       #test_path = os.path.join(FLAGS.data_dir, "test15/test15.ids50003.de")
       #test_data = reader.read_indexed_data(test_path)
@@ -289,6 +126,9 @@ def main(_):
           train_utils.run_epoch_eval(session, model, test_data, tf.no_op(), use_log_probs=use_log_probs)
     else:
       logging.info("Run model in training mode")
+      if FLAGS.fixed_random_seed:
+        tf.set_random_seed(1234)
+
       if FLAGS.model:
         config = model_utils.get_config(FLAGS.model)
         eval_config = model_utils.get_config(FLAGS.model)
@@ -297,9 +137,20 @@ def main(_):
         eval_config = copy.copy(config)
       else:
         logging.error("Must specify either model name or config file.")
-        sys.exit(1)
+        exit(1)
+
       eval_config.batch_size = 1
       eval_config.num_steps = 1
+      model, mvalid, mtest = model_utils.create_model(session, config, eval_config, FLAGS.train_dir, FLAGS.optimizer)
+
+      # Restore saved train variable
+      start_idx = 0
+      tmpfile = FLAGS.train_dir+"/tmp_idx.pkl"
+      if model.global_step.eval() >= FLAGS.steps_per_checkpoint and \
+        os.path.isfile(tmpfile):
+          with open(tmpfile, "rb") as f:
+            start_idx = pickle.load(f)
+            logging.info("Restore saved train variable from %s, resume from train idx=%i" % (tmpfile, start_idx))
 
       if FLAGS.data_dir:
         raw_data = reader.ptb_raw_data(FLAGS.data_dir)
@@ -309,38 +160,8 @@ def main(_):
         valid_data = reader.read_indexed_data(FLAGS.dev_idx, vocab_size=config.vocab_size)
         test_data = reader.read_indexed_data(FLAGS.test_idx, vocab_size=config.vocab_size)
 
-      if FLAGS.use_adagrad:
-        config.learning_rate = 0.5
-      if FLAGS.fixed_random_seed:
-        tf.set_random_seed(1234)
-
-      initializer = tf.random_uniform_initializer(-config.init_scale,
-                                                config.init_scale)
-      with tf.variable_scope("model", reuse=None, initializer=initializer):
-        model = RNNLMModel(is_training=True, config=config)
-      with tf.variable_scope("model", reuse=True, initializer=initializer):
-        mvalid = RNNLMModel(is_training=False, config=config)
-        mtest = RNNLMModel(is_training=False, config=eval_config)
-
-      ckpt = tf.train.get_checkpoint_state(FLAGS.train_dir)
-      if ckpt and tf.gfile.Exists(ckpt.model_checkpoint_path):
-        logging.info("Reading model parameters from %s" % ckpt.model_checkpoint_path)
-        model.saver.restore(session, ckpt.model_checkpoint_path)
-      else:
-        logging.info("Created model with fresh parameters.")
-        session.run(tf.initialize_all_variables())
-
-      # Restore saved train variable
-      start_idx = 0
-      tmpfile = FLAGS.train_dir+"/tmp_idx.pkl"
-      if model.global_step.eval() >= FLAGS.steps_per_checkpoint and \
-        os.path.isfile(tmpfile):
-          with open(tmpfile, "rb") as f:
-            start_idx = pickle.load(f)     
-            logging.info("Restore saved train variable from %s, resume from train idx=%i" % (tmpfile, start_idx))
-
       for i in range(config.max_max_epoch):
-        if not (FLAGS.use_adadelta or FLAGS.use_adam):
+        if not (FLAGS.optimizer == "adadelta" or FLAGS.optimizer == "adam"):
           lr_decay = config.lr_decay ** max(i - config.max_epoch, 0.0)
           model.assign_lr(session, config.learning_rate * lr_decay)
 

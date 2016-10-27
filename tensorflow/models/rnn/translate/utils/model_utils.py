@@ -1,5 +1,6 @@
 from tensorflow.models.rnn.translate.utils import data_utils
 from tensorflow.models.rnn.translate.seq2seq import seq2seq_model, tf_seq2seq
+from tensorflow.python.platform import gfile
 import tensorflow as tf
 import os,re
 import logging
@@ -84,19 +85,37 @@ def make_bucket(src_length, greedy_decoder=False):
     # Additional bucket for decoding with single-step decoding graph: input length=1 on the target side)
     return (src_length, 1)
 
-def get_singlestep_Seq2SeqModel(config, buckets):
-  return tf_seq2seq.TFSeq2SeqEngine(
-      config['src_vocab_size'], config['trg_vocab_size'], buckets,
-      config['embedding_size'], config['hidden_size'],
-      config['num_layers'], config['max_gradient_norm'], 1, # Batch size is 1
-      config['learning_rate'], config['learning_rate_decay_factor'], use_lstm=config['use_lstm'],
-      num_samples=config['num_samples'], forward_only=True,
-      opt_algorithm=config['opt_algorithm'], encoder=config['encoder'],
-      use_sequence_length=config['use_seqlen'], use_src_mask=config['use_src_mask'], 
-      maxout_layer=config['maxout_layer'], init_backward=config['init_backward'],
-      no_pad_symbol=config['no_pad_symbol'],
-      variable_prefix=config['variable_prefix'],
-      init_const=config['bow_init_const'], use_bow_mask=config['use_bow_mask'])
+def create_model(session, config, forward_only, rename_variable_prefix=None):
+  """Create or load translation model for training or greedy decoding"""
+  if not forward_only:
+    logging.info("Creating %d layers of %d units, encoder=%s." % (config['num_layers'], config['hidden_size'], config['encoder']))
+  model = get_Seq2SeqModel(config, _buckets, forward_only, rename_variable_prefix)
+
+  ckpt = tf.train.get_checkpoint_state(config['train_dir'])
+  if ckpt and tf.gfile.Exists(ckpt.model_checkpoint_path):
+    logging.info("Reading model parameters from %s" % ckpt.model_checkpoint_path)
+    model.saver.restore(session, ckpt.model_checkpoint_path)
+  else:
+    logging.info("Created model with fresh parameters.")
+    session.run(tf.initialize_all_variables())
+  return model, ckpt
+
+def load_model(session, config):
+  """Load translation model with single-step graph for decoding"""
+  buckets = make_buckets(config['num_symm_buckets'], config['max_sequence_length'], config['add_src_eos'], train=False)
+  model = get_singlestep_Seq2SeqModel(config, buckets)
+  training_graph = model.create_training_graph() # Needed for loading variables
+  encoding_graph = model.create_encoding_graph()
+  single_step_decoding_graph = model.create_single_step_decoding_graph(encoding_graph.outputs)
+
+  ckpt = tf.train.get_checkpoint_state(config['train_dir'])
+  if ckpt and gfile.Exists(ckpt.model_checkpoint_path):
+    logging.info("Reading model parameters from %s" % ckpt.model_checkpoint_path)
+    training_graph.saver.restore(session, ckpt.model_checkpoint_path)
+  else:
+    logging.fatal("Could not load model parameters from %s" % ckpt.model_checkpoint_path)
+
+  return model, training_graph, encoding_graph, single_step_decoding_graph, buckets
 
 def get_Seq2SeqModel(config, buckets, forward_only, rename_variable_prefix=None):
   return seq2seq_model.Seq2SeqModel(
@@ -113,28 +132,28 @@ def get_Seq2SeqModel(config, buckets, forward_only, rename_variable_prefix=None)
       max_to_keep=config['max_to_keep'],
       rename_variable_prefix=rename_variable_prefix)
 
-def create_model(config, session, forward_only, rename_variable_prefix=None):
-  """Create translation model and initialize or load parameters in session."""
-  if not forward_only:
-    logging.info("Creating %d layers of %d units, encoder=%s." % (config['num_layers'], config['hidden_size'], config['encoder']))
-    
-  model = get_Seq2SeqModel(config, _buckets, forward_only, rename_variable_prefix)
+def get_singlestep_Seq2SeqModel(config, buckets):
+  return tf_seq2seq.TFSeq2SeqEngine(
+      config['src_vocab_size'], config['trg_vocab_size'], buckets,
+      config['embedding_size'], config['hidden_size'],
+      config['num_layers'], config['max_gradient_norm'], 1, # Batch size is 1
+      config['learning_rate'], config['learning_rate_decay_factor'], use_lstm=config['use_lstm'],
+      num_samples=config['num_samples'], forward_only=True,
+      opt_algorithm=config['opt_algorithm'], encoder=config['encoder'],
+      use_sequence_length=config['use_seqlen'], use_src_mask=config['use_src_mask'],
+      maxout_layer=config['maxout_layer'], init_backward=config['init_backward'],
+      no_pad_symbol=config['no_pad_symbol'],
+      variable_prefix=config['variable_prefix'],
+      init_const=config['bow_init_const'], use_bow_mask=config['use_bow_mask'])
 
-  ckpt = tf.train.get_checkpoint_state(config['train_dir'])
-  if ckpt and tf.gfile.Exists(ckpt.model_checkpoint_path):
-    logging.info("Reading model parameters from %s" % ckpt.model_checkpoint_path)
-    model.saver.restore(session, ckpt.model_checkpoint_path)
-  else:
-    logging.info("Created model with fresh parameters.")
-    session.run(tf.initialize_all_variables())
-  return model, ckpt
-  
-def rename_model_vars(config):
+def rename_variable_prefix(config):
   logging.info("Rename model variables with prefix %s" % config['variable_prefix'])
   with tf.Session() as session:
     # Create model and restore variable
     logging.info("Creating %d layers of %d units, encoder=%s." % (config['num_layers'], config['hidden_size'], config['encoder']))
-    model, ckpt = create_model(config, _buckets, session, forward_only=False, rename_variable_prefix=config['variable_prefix'])
+    rename_variable_prefix=config['variable_prefix']
+    config['variable_prefix'] = None
+    model, ckpt = create_model(session, config, forward_only=False, rename_variable_prefix=rename_variable_prefix)
 
     # Save model with new variable names
     checkpoint_path = os.path.join(config['train_dir']+"_mult", os.path.basename(ckpt.model_checkpoint_path))

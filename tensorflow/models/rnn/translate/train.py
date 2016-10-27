@@ -89,7 +89,7 @@ tf.app.flags.DEFINE_float("max_gradient_norm", 1.0, "Clip gradients to this norm
 tf.app.flags.DEFINE_integer("batch_size", 80, "Batch size to use during training.")
 
 # Rename model variables
-tf.app.flags.DEFINE_bool("rename_model_vars", False, "Rename model variables with variable_prefix")
+tf.app.flags.DEFINE_bool("rename_variable_prefix", False, "Rename model variables with variable_prefix (assuming the model was saved with no prefix)")
 
 FLAGS = tf.app.flags.FLAGS
 
@@ -112,7 +112,7 @@ def train(config):
     # Create model
     if config['fixed_random_seed']:
       tf.set_random_seed(1234)
-    model, _ = model_utils.create_model(config, session, forward_only=False)
+    model, _ = model_utils.create_model(session, config, forward_only=False)
 
     # Read data into buckets and prepare buckets for training
     logging.info ("Reading development and training data (limit: %d)." % config['max_train_data_size'])
@@ -261,8 +261,8 @@ def main(_):
     self_test()
   else:
     config = model_utils.process_args(FLAGS)
-    if config['rename_model_vars']:
-      model_utils.rename_model_vars(config)
+    if config['rename_variable_prefix']:
+      model_utils.rename_variable_prefix(config)
     else:
       train(config)
 
