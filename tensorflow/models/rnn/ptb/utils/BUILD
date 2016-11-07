@@ -25,7 +25,10 @@ py_library(
         "model_utils.py",
     ],
     srcs_version = "PY2AND3",
-    deps = ["//tensorflow:tensorflow_py"],
+    deps = [
+	"//tensorflow/models/rnn/ptb:rnnlm",
+	"//tensorflow:tensorflow_py"
+    ],
 )
 
 py_library(

@@ -101,7 +101,7 @@ class BOWCell(RNNCell):
         b_i = tf.get_variable("input_b", [embedding_size])
         i = sigmoid(tf.nn.bias_add(embedding, b_i))
         w_annotation = i * annotation
-        outputs.append(w_annotation) # version 2
+        outputs.append(w_annotation)
 
       # return empty state, will be initialized by decoder
       batch_size = array_ops.shape(inputs[0])[0]

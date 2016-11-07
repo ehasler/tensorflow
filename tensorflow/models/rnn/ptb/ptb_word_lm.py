@@ -144,13 +144,15 @@ def main(_):
       model, mvalid, mtest = model_utils.create_model(session, config, eval_config, FLAGS.train_dir, FLAGS.optimizer)
 
       # Restore saved train variable
+      start_epoch = 1
       start_idx = 0
+      start_state = None
       tmpfile = FLAGS.train_dir+"/tmp_idx.pkl"
       if model.global_step.eval() >= FLAGS.steps_per_checkpoint and \
         os.path.isfile(tmpfile):
           with open(tmpfile, "rb") as f:
-            start_idx = pickle.load(f)
-            logging.info("Restore saved train variable from %s, resume from train idx=%i" % (tmpfile, start_idx))
+            start_epoch, start_idx, start_state = pickle.load(f)
+            logging.info("Restore saved train variables from %s, resume from epoch=%i and train idx=%i and last state" % (tmpfile, start_epoch, start_idx))
 
       if FLAGS.data_dir:
         raw_data = reader.ptb_raw_data(FLAGS.data_dir)
@@ -160,20 +162,25 @@ def main(_):
         valid_data = reader.read_indexed_data(FLAGS.dev_idx, vocab_size=config.vocab_size)
         test_data = reader.read_indexed_data(FLAGS.test_idx, vocab_size=config.vocab_size)
 
-      for i in range(config.max_max_epoch):
+      for epoch in range(start_epoch, config.max_max_epoch+1):
         if not (FLAGS.optimizer == "adadelta" or FLAGS.optimizer == "adam"):
-          lr_decay = config.lr_decay ** max(i - config.max_epoch, 0.0)
-          model.assign_lr(session, config.learning_rate * lr_decay)
-
-        logging.info("Epoch: %d Learning rate: %.3f" % (i + 1, session.run(model.lr)))
+          if start_idx == 0:
+            lr_decay = config.lr_decay ** max(epoch - config.max_epoch, 0.0)
+            model.assign_lr(session, config.learning_rate * lr_decay)
+        logging.info("Epoch: %d Learning rate: %.3f" % (epoch, session.run(model.lr)))
 
         train_perplexity = train_utils.run_epoch(session, model, train_data, model.train_op, FLAGS.train_dir, FLAGS.steps_per_checkpoint,
-                                                 train=True, start_idx=start_idx, tmpfile=tmpfile, m_valid=mvalid, valid_data=valid_data)
+                                                 train=True, start_idx=start_idx, start_state=start_state, tmpfile=tmpfile, m_valid=mvalid,
+                                                 valid_data=valid_data, epoch=epoch)
+        if start_idx == 0:
+          logging.info("Epoch: %d Train Perplexity: %.3f" % (epoch, train_perplexity))
+        else:
+          logging.info("Epoch: %d Train Perplexity: %.3f (incomplete)" % (epoch, train_perplexity))
         start_idx = 0
-        logging.info("Epoch: %d Train Perplexity: %.3f" % (i + 1, train_perplexity))
+        start_state = None
 
         valid_perplexity = train_utils.run_epoch(session, mvalid, valid_data, tf.no_op(), FLAGS.train_dir, FLAGS.steps_per_checkpoint)
-        logging.info("Epoch: %d Full Valid Perplexity: %.3f" % (i + 1, valid_perplexity))
+        logging.info("Epoch: %d Full Valid Perplexity: %.3f" % (epoch, valid_perplexity))
 
       logging.info("Training finished.")
       test_perplexity = train_utils.run_epoch(session, mtest, test_data, tf.no_op(), FLAGS.train_dir, FLAGS.steps_per_checkpoint)

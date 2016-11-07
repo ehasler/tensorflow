@@ -153,9 +153,10 @@ def print_stats(model, loss, step_time, opt_algorithm):
            "%.2f" % (model.global_step.eval(),
                      step_time, perplexity))
 
-def save_checkpoint(session, model, train_dir):
+def save_checkpoint(session, model, train_dir, epoch):
  checkpoint_path = os.path.join(train_dir, "translate.ckpt")
- logging.info("Save model to path=%s after global step=%d" % (checkpoint_path, model.global_step.eval()))
+ logging.info("Epoch %i, save model to path=%s after global step=%d" % (epoch, checkpoint_path, model.global_step.eval()))
+ model.epoch = epoch
  model.saver.save(session, checkpoint_path, global_step=model.global_step)
 
 def run_eval(config, session, model, dev_set, previous_eval_ppxs):
