@@ -116,7 +116,7 @@ def train(config):
 
     # Read data into buckets and prepare buckets for training
     logging.info ("Reading development and training data (limit: %d)." % config['max_train_data_size'])
-    train_set = data_utils.read_data(model_utils._buckets, src_train, trg_train, config['max_train_data_size'], 
+    train_set = data_utils.read_data(model_utils._buckets, src_train, trg_train, config['max_train_data_size'],
                                      src_vcb_size=config['src_vocab_size'],
                                      trg_vcb_size=config['trg_vocab_size'])
     dev_set = data_utils.read_data(model_utils._buckets, src_dev, trg_dev,
@@ -125,10 +125,14 @@ def train(config):
                                    add_src_eos=config['add_src_eos'])
     tmpfile = config['train_dir']+"/tmp_idx.pkl"
     tmpfile_bookk = config['train_dir']+"/tmp_bookk.pkl"
-    train_buckets_scale, train_idx_map, bucket_offset_pairs, train_size, num_train_batches, bookk = train_utils.prepare_buckets(
-                                                                                                      model, train_set, tmpfile, tmpfile_bookk if config['debug'] else None,
-                                                                                                      config['train_sequential'], config['steps_per_checkpoint'],
-                                                                                                      config['shuffle_data'])
+    train_buckets_scale, train_idx_map, bucket_offset_pairs, train_size, num_train_batches, bookk = \
+      train_utils.prepare_buckets(model,
+                                  train_set,
+                                  tmpfile,
+                                  tmpfile_bookk if config['debug'] else None,
+                                  config['train_sequential'],
+                                  config['steps_per_checkpoint'],
+                                  config['shuffle_data'])
     # This is the training loop.
     step_time, loss = 0.0, 0.0
     current_step = model.global_step.eval()
@@ -136,12 +140,14 @@ def train(config):
     previous_eval_ppxs = [] # used for model saving
     previous_bleus = [] # used for model saving
     current_batch_idx = None
-    epoch = None
+    epoch = 1
+    if model.epoch > 1:
+      epoch = model.epoch
     while True:
       current_batch_idx = model.global_step.eval() % num_train_batches
       if current_batch_idx == 0:
         # New epoch
-        epoch = int(model.global_step.eval() / num_train_batches)
+        epoch = int(model.global_step.eval() / num_train_batches) + 1
         logging.info("Epoch=%i" % epoch)
 
         # Shuffle train variables and save result
@@ -155,12 +161,12 @@ def train(config):
           if os.path.isfile(tmpfile):
             os.rename(tmpfile, tmpfile+".old")
           with open(tmpfile, "wb") as f:
-            logging.info("Save training example permutation to path=%s" % tmpfile)
+            logging.info("Epoch %i, save training example permutation to path=%s" % (epoch,tmpfile))
             pickle.dump((train_idx_map, bucket_offset_pairs), f, pickle.HIGHEST_PROTOCOL)
 
         # Debugging: check if all training examples have been processed in the past epoch
         if config['debug']:
-          if epoch > 0 and bookk is not None:
+          if epoch > 1 and bookk is not None:
             lengths = [ len(bookk[b].keys()) for b in bookk.keys() ]
             logging.info("After epoch %i: Total examples=%i, processed examples=%i" % (epoch-1, train_size, sum(lengths)))
             assert train_size == sum(lengths), "ERROR: training set has not been fully processed"
@@ -178,7 +184,7 @@ def train(config):
                                                                  bucket_offset_pairs, current_batch_idx, current_step,
                                                                  config['train_sequential'], config['steps_per_checkpoint'])
 
-      # Make a step on a random a sequential batch (processing one batch is a global step)
+      # Make a step on a random sequential batch (processing one batch is a global step)
       start_time = time.time()
       encoder_inputs, decoder_inputs, target_weights, sequence_length, src_mask, bow_mask = model.get_batch(
         train_set, bucket_id, config['encoder'], batch_ptr=batch_ptr if config['train_sequential'] else None,
@@ -195,14 +201,14 @@ def train(config):
       # Once in a while, we save a checkpoint, print statistics, and run evals.
       if current_step % config['steps_per_checkpoint'] == 0:
         train_utils.print_stats(model, loss, step_time, config['opt_algorithm'])
-        train_utils.save_checkpoint(session, model, config['train_dir'])
+        train_utils.save_checkpoint(session, model, config['train_dir'], epoch)
 
         # Debugging: save book keeping dict
         if config['debug']:
           if os.path.isfile(tmpfile_bookk):
             os.rename(tmpfile_bookk, tmpfile_bookk+".old")
           with open(tmpfile_bookk, "wb") as f:
-            logging.info("Save book keeping variable to path=%s" % tmpfile_bookk)
+            logging.info("Epoch %i, save book keeping variable to path=%s" % (epoch, tmpfile_bookk))
             pickle.dump(bookk, f, pickle.HIGHEST_PROTOCOL)
 
         # Decrease learning rate if no improvement was seen over last 3 times.
@@ -227,9 +233,10 @@ def train(config):
       #endif save checkpoint
 
       if (config['max_train_batches'] > 0 and model.global_step.eval() >= config['max_train_batches']) or \
-        (config['max_train_epochs'] > 0 and epoch+1 == config['max_train_epochs'] and current_batch_idx == num_train_batches):
+        (config['max_train_epochs'] > 0 and epoch == config['max_train_epochs'] and current_batch_idx + 1 == num_train_batches):
           if current_step % config['steps_per_checkpoint'] != 0:
-            train_utils.save_checkpoint(session, model, config['train_dir'])
+            train_utils.save_checkpoint(session, model, config['train_dir'], epoch)
+          logging.info("Stopped training after %i epochs" % epoch)
           logging.info("Time: {}".format(datetime.datetime.strftime(datetime.datetime.now(), '%Y-%m-%d %H:%M:%S')))
           break
 

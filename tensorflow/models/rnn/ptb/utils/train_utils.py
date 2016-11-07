@@ -8,16 +8,26 @@ import tensorflow as tf
 from tensorflow.models.rnn.ptb import reader
 
 def run_epoch(session, m, data, eval_op, train_dir, steps_per_ckpt, train=False, 
-              start_idx=0, tmpfile=None, m_valid=None, valid_data=None):
+              start_idx=0, start_state=None, tmpfile=None, m_valid=None, valid_data=None, epoch=None):
   """Runs the model on the given data."""
   epoch_size = ((len(data) // m.batch_size) - 1) // m.num_steps
-  logging.info("Data_size=%s batch_size=%s epoch_size=%s" % (len(data), m.batch_size, epoch_size))
+  if train:
+    logging.info("Training data_size=%s batch_size=%s epoch_size=%s start_idx=%i global_step=%s" % \
+      (len(data), m.batch_size, epoch_size, start_idx, m.global_step.eval()))
+  else:
+    logging.info("Val/Test data_size=%s batch_size=%s epoch_size=%s start_idx=%i" % (len(data), m.batch_size, epoch_size, start_idx))
   start_time = time.time()
   costs = 0.0
   iters = 0
-  state = m.initial_state.eval()
+  if start_idx == 0:
+    state = m.initial_state.eval()
+  else:
+    state = start_state
   for step, (x, y) in enumerate(reader.ptb_iterator(data, m.batch_size,
                                                     m.num_steps, start_idx), start=1+start_idx):
+    if train:
+      logging.debug("Epoch=%i start_idx=%i step=%i global_step=%i " % (epoch, start_idx, step, m.global_step.eval()))
+
     cost, state, _ = session.run([m.cost, m.final_state, eval_op],
                                  {m.input_data: x,
                                   m.targets: y,
@@ -37,17 +47,18 @@ def run_epoch(session, m, data, eval_op, train_dir, steps_per_ckpt, train=False,
       logging.info("%.3f perplexity: %.3f speed: %.0f wps" %
             (step * 1.0 / epoch_size, np.exp(costs / iters),
              iters * m.batch_size / (time.time() - start_time)))
-      # Save train variable
-      with open(tmpfile, "wb") as f:
-        # Training idx = step - 1, so we want to resume from idx = step
-        # If we had already restarted from start_idx, this gives the offset
-        resume_from = step
-        pickle.dump(resume_from, f, pickle.HIGHEST_PROTOCOL)  
-
       checkpoint_path = os.path.join(train_dir, "rnn.ckpt")
       finished_idx = step - 1
       logging.info("Save model to path=%s after training_idx=%s and global_step=%s" % (checkpoint_path, finished_idx, m.global_step.eval()))
       m.saver.save(session, checkpoint_path, global_step=m.global_step)
+
+      # Save train variables
+      with open(tmpfile, "wb") as f:
+        # Training idx = step - 1, so we want to resume from idx = step
+        # If we had already restarted from start_idx, this gives the offset
+        training_idx = step
+        logging.info("Save epoch=%i and training_idx=%i and state to resume from" % (epoch, training_idx))
+        pickle.dump((epoch, training_idx, state), f, pickle.HIGHEST_PROTOCOL)
       
       # Get a random validation batch and evaluate
       data_len = len(valid_data)
