@@ -18,8 +18,8 @@ def read_config(config_file, config):
     return v.lower() in ('true', 't')  
   
   if not config_file or not os.path.isfile(config_file):
-    logging.error("Cannot load config file %s" % config_file)
-    exit(1)
+    raise ValueError("Cannot load config file %s" % config_file)
+
   logging.info("Settings from tensorflow config file:")    
   with open(config_file) as f:
     for line in f:
@@ -42,8 +42,12 @@ def process_args(FLAGS, train=True, greedy_decoder=False):
   for key,value in FLAGS.__dict__['__flags'].iteritems():
     config[key] = value
 
-  # Then read config file
-  read_config(config['config_file'], config)
+  # Then read config file if available
+  if config['config_file']:
+    read_config(config['config_file'], config)
+
+  if not config['train_dir']:
+     raise ValueError("Must set --train_dir")
 
   # Process specific args
   if config['opt_algorithm'] not in [ "sgd", "adagrad", "adadelta" ]:

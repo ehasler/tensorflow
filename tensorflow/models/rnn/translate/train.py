@@ -21,7 +21,7 @@ tf.app.flags.DEFINE_string("config_file", None, "Pass options in a config file (
 # Training settings
 tf.app.flags.DEFINE_string("src_lang", "en", "Source language")
 tf.app.flags.DEFINE_string("trg_lang", "de", "Target language")
-tf.app.flags.DEFINE_string("train_dir", "/tmp", "Training directory.")
+tf.app.flags.DEFINE_string("train_dir", None, "Training directory.")
 tf.app.flags.DEFINE_string("data_dir", "/tmp", "Data directory if data needs to be prepared")
 tf.app.flags.DEFINE_boolean("use_default_data", False, "If set, download and prepare Gigaword data set instead of providing custom train/dev/test data. That data will be tokenized first.")
 tf.app.flags.DEFINE_string("train_src", None, "Source side of training data")
