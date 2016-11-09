@@ -19,7 +19,7 @@ from __future__ import division
 from __future__ import print_function
 
 import gzip
-import os, sys
+import os
 import re
 import tarfile
 
@@ -293,16 +293,17 @@ def get_training_data(config):
         logging.info("Get indexed training and dev data")
         src_train, trg_train, src_dev, trg_dev = config['train_src_idx'], config['train_trg_idx'], \
                                                  config['dev_src_idx'], config['dev_trg_idx'] 
-    elif config['train_src_idx'] != None and config['train_trg_idx'] != None and \
-      config['dev_src_idx'] != None and config['dev_trg_idx'] != None:
-        logging.info("Index tokenized training and dev data and write to dir=%" % config['data_dir'])
+    elif config['train_src'] != None and config['train_trg'] != None and \
+      config['dev_src'] != None and config['dev_trg'] != None:
+        logging.info("Index tokenized training and dev data and write to dir=%s" % config['data_dir'])
         src_train, trg_train, src_dev, trg_dev, _, _ =  prepare_data(
           config['data_dir'], config['src_vocab_size'], config['trg_vocab_size'],
           config['train_src'], config['train_trg'], config['dev_src'], config['dev_trg'],
           config['src_lang'], config['trg_lang'])
     else:
-      logging.error("You have to provide either tokenized or indexed training and dev data")
-      sys.exit(1)
+      logging.error("You have to provide either tokenized or integer-mapped training and dev data usinig " \
+        "--train_src, --train_trg, --dev_src, --dev_trg or --train_src_idx, --train_trg_idx, --dev_src_idx, --dev_trg_idx")
+      exit(1)
     return src_train, trg_train, src_dev, trg_dev
 
 def prepare_data(data_dir, src_vocabulary_size, trg_vocabulary_size,
@@ -332,20 +333,20 @@ def prepare_data(data_dir, src_vocabulary_size, trg_vocabulary_size,
   dev_path = os.path.join(data_dir, "dev")
 
   # Create vocabularies of the appropriate sizes.
-  src_vocab_path = os.path.join(data_dir, "vocab%d"+src_lang % src_vocabulary_size)
-  trg_vocab_path = os.path.join(data_dir, "vocab%d"+trg_lang % trg_vocabulary_size)
+  src_vocab_path = os.path.join(data_dir, "vocab%d" % src_vocabulary_size + "." + src_lang)
+  trg_vocab_path = os.path.join(data_dir, "vocab%d" % trg_vocabulary_size + "." + trg_lang)
   create_vocabulary(src_vocab_path, train_src, src_vocabulary_size)
   create_vocabulary(trg_vocab_path, train_trg, trg_vocabulary_size)
 
   # Create token ids for the training data.
-  src_train_ids_path = train_path + (".ids%d"+src_lang % src_vocabulary_size)
-  trg_train_ids_path = train_path + (".ids%d"+trg_lang % trg_vocabulary_size)
+  src_train_ids_path = train_path + (".ids%d" % src_vocabulary_size + "." + src_lang)
+  trg_train_ids_path = train_path + (".ids%d" % trg_vocabulary_size + "." + trg_lang)
   data_to_token_ids(train_path + "." + src_lang, src_train_ids_path, src_vocab_path)
   data_to_token_ids(train_path + "." + trg_lang, trg_train_ids_path, trg_vocab_path)
 
   # Create token ids for the development data.
-  src_dev_ids_path = dev_path + (".ids%d"+src_lang % src_vocabulary_size)
-  trg_dev_ids_path = dev_path + (".ids%d"+trg_lang % trg_vocabulary_size)
+  src_dev_ids_path = dev_path + (".ids%d" % src_vocabulary_size + "." + src_lang)
+  trg_dev_ids_path = dev_path + (".ids%d" % trg_vocabulary_size + "." + trg_lang)
   data_to_token_ids(dev_path + "." + src_lang, src_dev_ids_path, src_vocab_path)
   data_to_token_ids(dev_path + "." + trg_lang, trg_dev_ids_path, trg_vocab_path)
 

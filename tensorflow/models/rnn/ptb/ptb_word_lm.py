@@ -70,7 +70,7 @@ flags = tf.flags
 flags.DEFINE_string("model", None, "A type of model. Possible options are: small, medium, large.")
 flags.DEFINE_string("config_file", None, "Instead of selecting a predefined model, pass options in a config file")
 flags.DEFINE_string("data_dir", None, "Path to dir containing PTB training data")
-flags.DEFINE_string("train_dir", "/tmp", "Training directory.")
+flags.DEFINE_string("train_dir", None, "Training directory.")
 flags.DEFINE_string("train_idx", None, "Path to training data (integer-mapped)")
 flags.DEFINE_string("dev_idx", None, "Path to development data (integer-mapped)")
 flags.DEFINE_string("test_idx", None, "Path to test data (integer-mapped)")
@@ -84,8 +84,12 @@ flags.DEFINE_boolean("fixed_random_seed", False, "If True, use a fixed random se
 FLAGS = flags.FLAGS
 
 def main(_):
-  if not FLAGS.data_dir and (not FLAGS.train_idx or not FLAGS.dev_idx or not FLAGS.test_idx):
-    raise ValueError("Must set --data_dir to PTB data directory or specify data using --train_idx,--dev_idx,--test_idx")
+  if not FLAGS.train_dir:
+    logging.error("Must set --train_dir")
+    exit(1)
+  if not FLAGS.data_dir and (not FLAGS.train_idx or not FLAGS.dev_idx):
+    logging.error("Must set --data_dir to PTB data directory or specify data using --train_idx,--dev_idx")
+    exit(1)
 
   logging.getLogger().setLevel(logging.INFO)
   logging.info("Start: {}".format(datetime.datetime.strftime(datetime.datetime.now(), '%Y-%m-%d %H:%M:%S')))
@@ -160,7 +164,8 @@ def main(_):
       else:
         train_data = reader.read_indexed_data(FLAGS.train_idx, FLAGS.max_train_data_size, config.vocab_size)
         valid_data = reader.read_indexed_data(FLAGS.dev_idx, vocab_size=config.vocab_size)
-        test_data = reader.read_indexed_data(FLAGS.test_idx, vocab_size=config.vocab_size)
+        if FLAGS.test_idx:
+          test_data = reader.read_indexed_data(FLAGS.test_idx, vocab_size=config.vocab_size)
 
       for epoch in range(start_epoch, config.max_max_epoch+1):
         if not (FLAGS.optimizer == "adadelta" or FLAGS.optimizer == "adam"):
@@ -183,8 +188,9 @@ def main(_):
         logging.info("Epoch: %d Full Valid Perplexity: %.3f" % (epoch, valid_perplexity))
 
       logging.info("Training finished.")
-      test_perplexity = train_utils.run_epoch(session, mtest, test_data, tf.no_op(), FLAGS.train_dir, FLAGS.steps_per_checkpoint)
-      logging.info("Test Perplexity: %.3f" % test_perplexity)
+      if FLAGS.data_dir or FLAGS.test_idx:
+        test_perplexity = train_utils.run_epoch(session, mtest, test_data, tf.no_op(), FLAGS.train_dir, FLAGS.steps_per_checkpoint)
+        logging.info("Test Perplexity: %.3f" % test_perplexity)
 
       checkpoint_path = os.path.join(FLAGS.train_dir, "rnn.ckpt")
       logging.info("Save final model to path=%s" % checkpoint_path)
