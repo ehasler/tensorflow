@@ -137,8 +137,8 @@ def train(config):
     step_time, loss = 0.0, 0.0
     current_step = model.global_step.eval()
     previous_losses = [] # used for updating learning rate (train loss)
-    previous_eval_ppxs = [] # used for model saving
-    previous_bleus = [] # used for model saving
+    current_eval_ppxs = [] # used for model saving
+    current_bleu = 0 # used for model saving
     current_batch_idx = None
     epoch = 1
     if model.epoch > 1:
@@ -224,11 +224,11 @@ def train(config):
         if current_step % (config['steps_per_checkpoint'] * config['eval_frequency']) == 0:
           if config['eval_bleu']:
             if model.global_step.eval() >= config['eval_bleu_start']:
-              train_utils.decode_dev(config, model, previous_bleus)
+              current_bleu = train_utils.decode_dev(config, model, current_bleu)
             else:
               logging.info("Waiting until global step %i for BLEU evaluation on dev" % config['eval_bleu_start'])
           else:
-            train_utils.run_eval(config, session, model, dev_set, previous_eval_ppxs)
+            current_eval_ppxs = train_utils.run_eval(config, session, model, dev_set, current_eval_ppxs)
         logging.info("Time: {}".format(datetime.datetime.strftime(datetime.datetime.now(), '%Y-%m-%d %H:%M:%S')))
       #endif save checkpoint
 

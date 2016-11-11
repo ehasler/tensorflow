@@ -159,7 +159,7 @@ def save_checkpoint(session, model, train_dir, epoch):
  model.epoch = epoch
  model.saver.save(session, checkpoint_path, global_step=model.global_step)
 
-def run_eval(config, session, model, dev_set, previous_eval_ppxs):
+def run_eval(config, session, model, dev_set, current_eval_ppxs):
   logging.info("Run eval on development set")
   buckets = model_utils._buckets
   eval_ppxs = []
@@ -209,25 +209,27 @@ def run_eval(config, session, model, dev_set, previous_eval_ppxs):
     eval_ppxs.append(eval_ppx)
 
   # If the current model improves over the results of the previous dev eval, overwrite the dev_ppx model
-  if len(previous_eval_ppxs) > 0:
+  if len(current_eval_ppxs) > 0:
     num_improved = 0
-    prev_eval_ppxs = previous_eval_ppxs[-1]
-    for b in xrange(len(prev_eval_ppxs)):
-      if eval_ppxs[b] < prev_eval_ppxs[b]:
+    for b in xrange(len(current_eval_ppxs)):
+      if eval_ppxs[b] < current_eval_ppxs[b]:
         num_improved += 1
 
     checkpoint_path = os.path.join(config['train_dir'], "translate.ckpt-")
     current_model = checkpoint_path + str(model.global_step.eval())
     dev_ppx_model = checkpoint_path + "dev_ppx"
-    if num_improved == len(prev_eval_ppxs):
+    if num_improved == len(current_eval_ppxs):
       shutil.copy(current_model, dev_ppx_model)
       shutil.copy(current_model+".meta", dev_ppx_model+".meta")
       logging.info("Model %s achieves lower dev perplexity, updating %s" % (current_model, dev_ppx_model))
+      return eval_ppxs
     else:
       logging.info("Model %s does not achieve lower dev perplexity, not updating %s" % (current_model, dev_ppx_model))
-  previous_eval_ppxs.append(eval_ppxs)
+      return current_eval_ppxs
+  else:
+    return eval_ppxs
 
-def decode_dev(config, model, previous_bleus):
+def decode_dev(config, model, current_bleu):
   # Greedily decode dev set
   inp = config['dev_src_idx']
   out = os.path.join(config['train_dir'], "dev.out")
@@ -239,17 +241,18 @@ def decode_dev(config, model, previous_bleus):
   bleu = eval_set(out, ref)
 
   # If the current model improves over the results of the previous dev eval, overwrite the dev_bleu model
-  if len(previous_bleus) > 0:
-    checkpoint_path = os.path.join(config['train_dir'], "translate.ckpt-")
-    current_model = checkpoint_path + str(model.global_step.eval())
-    dev_bleu_model = checkpoint_path + "dev_bleu"
-    if bleu > previous_bleus[-1]:
-      shutil.copy(current_model, dev_bleu_model)
-      shutil.copy(current_model+".meta", dev_bleu_model+".meta")
-      logging.info("Model %s achieves higher BLEU, updating %s" % (current_model, dev_bleu_model))
-    else:
-      logging.info("Model %s does not achieve higher BLEU, not updating %s" % (current_model, dev_bleu_model))
-  previous_bleus.append(bleu)
+  checkpoint_path = os.path.join(config['train_dir'], "translate.ckpt-")
+  current_model = checkpoint_path + str(model.global_step.eval())
+  dev_bleu_model = checkpoint_path + "dev_bleu"
+  if bleu > current_bleu:
+    current_bleu = bleu
+    shutil.copy(current_model, dev_bleu_model)
+    shutil.copy(current_model+".meta", dev_bleu_model+".meta")
+    logging.info("Model %s achieves new best BLEU=%f, updating %s" % (current_model, bleu, dev_bleu_model))
+    return bleu
+  else:
+    logging.info("Model %s does not achieve higher BLEU, not updating %s" % (current_model, dev_bleu_model))
+    return current_bleu
 
 def eval_set(out, ref):
   # multi-bleu.pl [-lc] reference < hypothesis
