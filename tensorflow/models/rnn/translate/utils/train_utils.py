@@ -248,7 +248,7 @@ def decode_dev(config, model, current_bleu):
     current_bleu = bleu
     shutil.copy(current_model, dev_bleu_model)
     shutil.copy(current_model+".meta", dev_bleu_model+".meta")
-    logging.info("Model %s achieves new best BLEU=%f, updating %s" % (current_model, bleu, dev_bleu_model))
+    logging.info("Model %s achieves new best BLEU=%.2f, updating %s" % (current_model, bleu, dev_bleu_model))
     return bleu
   else:
     logging.info("Model %s does not achieve higher BLEU, not updating %s" % (current_model, dev_bleu_model))
