@@ -89,11 +89,13 @@ def make_bucket(src_length, greedy_decoder=False):
     # Additional bucket for decoding with single-step decoding graph: input length=1 on the target side)
     return (src_length, 1)
 
-def create_model(session, config, forward_only, rename_variable_prefix=None):
+def create_model(session, config, forward_only, rename_variable_prefix=None, buckets=None):
   """Create or load translation model for training or greedy decoding"""
   if not forward_only:
     logging.info("Creating %d layers of %d units, encoder=%s." % (config['num_layers'], config['hidden_size'], config['encoder']))
-  model = get_Seq2SeqModel(config, _buckets, forward_only, rename_variable_prefix)
+  if not buckets:
+    buckets = _buckets
+  model = get_Seq2SeqModel(config, buckets, forward_only, rename_variable_prefix)
 
   ckpt = tf.train.get_checkpoint_state(config['train_dir'])
   if ckpt and tf.gfile.Exists(ckpt.model_checkpoint_path):

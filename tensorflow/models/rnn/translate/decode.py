@@ -44,12 +44,14 @@ def decode(config, input=None, output=None, max_sentences=0):
       if len(token_ids) > max_input_length:
         max_input_length = len(token_ids)
   bucket = model_utils.make_bucket(max_input_length, greedy_decoder=True)
-  model_utils._buckets.append(bucket)
+  buckets = list(model_utils._buckets)
+  buckets.append(bucket)
   logging.info("Add new bucket={}".format(bucket))
 
   with tf.Session() as session:
     # Create model and load parameters: uses the training graph for decoding
-    model, _ = model_utils.create_model(session, config, forward_only=True)
+    model, _ = model_utils.create_model(session, config, forward_only=True,
+                                        buckets=buckets)
     model.batch_size = 1  # We decode one sentence at a time.
 
     # Decode input file
@@ -63,7 +65,7 @@ def decode(config, input=None, output=None, max_sentences=0):
     logging.info("Start decoding, max_sentences=%i" % max_sents)
     with open(inp) as f_in, open(out, 'w') as f_out:
       for sentence in f_in:
-        outputs = get_outputs(session, config, model, sentence)
+        outputs = get_outputs(session, config, model, sentence, buckets)
         logging.info("Output: {}".format(outputs))
 
         # If there is an EOS symbol in outputs, cut them at that point.
@@ -93,7 +95,7 @@ def decode_interactive(config):
       sys.stdout.flush()
       sentence = sys.stdin.readline()
 
-def get_outputs(session, config, model, sentence):
+def get_outputs(session, config, model, sentence, buckets=None):
   # Get token-ids for the input sentence.
   token_ids = [ int(tok) for tok in sentence.strip().split() ]
   token_ids = [ w if w < config['src_vocab_size'] else data_utils.UNK_ID
@@ -101,9 +103,11 @@ def get_outputs(session, config, model, sentence):
   if config['add_src_eos']:
     token_ids.append(data_utils.EOS_ID)
 
-  bucket_id = min([b for b in xrange(len(model_utils._buckets))
-                  if model_utils._buckets[b][0] >= len(token_ids)])
-  logging.info("Bucket {}".format(model_utils._buckets[bucket_id]))
+  if not buckets:
+    buckets = model_utils._buckets
+  bucket_id = min([b for b in xrange(len(buckets))
+                  if buckets[b][0] >= len(token_ids)])
+  logging.info("Bucket {}".format(buckets[bucket_id]))
   logging.info("Input: {}".format(token_ids))
 
   # Get a 1-element batch to feed the sentence to the model.
