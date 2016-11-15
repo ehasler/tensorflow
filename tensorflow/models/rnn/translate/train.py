@@ -112,7 +112,7 @@ def train(config):
     # Create model
     if config['fixed_random_seed']:
       tf.set_random_seed(1234)
-    model, _ = model_utils.create_model(session, config, forward_only=False)
+    model = model_utils.create_model(session, config, forward_only=False)
 
     # Read data into buckets and prepare buckets for training
     logging.info ("Reading development and training data (limit: %d)." % config['max_train_data_size'])
