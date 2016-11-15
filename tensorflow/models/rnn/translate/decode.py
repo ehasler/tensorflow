@@ -24,6 +24,7 @@ tf.app.flags.DEFINE_string("test_src_idx", "/tmp/in.txt", "An integer-encoded in
 tf.app.flags.DEFINE_string("test_out_idx", "/tmp/out.txt", "Output file for decoder output")
 tf.app.flags.DEFINE_integer("max_sentences", 0, "The maximum number of sentences to translate (all if set to 0)")
 tf.app.flags.DEFINE_boolean("interactive", False, "Decode from command line")
+tf.app.flags.DEFINE_string("model_path", None, "Path to trained model")
 FLAGS = tf.app.flags.FLAGS
 
 def decode(config, input=None, output=None, max_sentences=0):
@@ -50,7 +51,7 @@ def decode(config, input=None, output=None, max_sentences=0):
 
   with tf.Session() as session:
     # Create model and load parameters: uses the training graph for decoding
-    model, _ = model_utils.create_model(session, config, forward_only=True,
+    model = model_utils.create_model(session, config, forward_only=True,
                                         buckets=buckets)
     model.batch_size = 1  # We decode one sentence at a time.
 
@@ -81,7 +82,7 @@ def decode(config, input=None, output=None, max_sentences=0):
 def decode_interactive(config):
   with tf.Session() as session:
     # Create model and load parameters: uses the training graph for decoding
-    model, _ = model_utils.create_model(session, config, forward_only=True)
+    model = model_utils.create_model(session, config, forward_only=True)
     model.batch_size = 1  # We decode one sentence at a time.
 
     # Decode from standard input.

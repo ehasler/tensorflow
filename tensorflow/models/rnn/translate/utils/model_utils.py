@@ -89,6 +89,19 @@ def make_bucket(src_length, greedy_decoder=False):
     # Additional bucket for decoding with single-step decoding graph: input length=1 on the target side)
     return (src_length, 1)
 
+def get_model_path(config):
+  if 'model_path' in config and config['model_path']:
+    return config['model_path']
+  elif 'train_dir' in config and config['train_dir']:
+    ckpt = tf.train.get_checkpoint_state(config['train_dir'])
+    if ckpt:
+      return ckpt.model_checkpoint_path
+    else:
+      return None
+  else:
+    logging.error("You have to specify either --train_dir or --model_path")
+    exit(1)
+
 def create_model(session, config, forward_only, rename_variable_prefix=None, buckets=None):
   """Create or load translation model for training or greedy decoding"""
   if not forward_only:
@@ -97,14 +110,14 @@ def create_model(session, config, forward_only, rename_variable_prefix=None, buc
     buckets = _buckets
   model = get_Seq2SeqModel(config, buckets, forward_only, rename_variable_prefix)
 
-  ckpt = tf.train.get_checkpoint_state(config['train_dir'])
-  if ckpt and tf.gfile.Exists(ckpt.model_checkpoint_path):
-    logging.info("Reading model parameters from %s" % ckpt.model_checkpoint_path)
-    model.saver.restore(session, ckpt.model_checkpoint_path)
+  model_path = get_model_path(config)
+  if model_path and tf.gfile.Exists(model_path):
+    logging.info("Reading model parameters from %s" % model_path)
+    model.saver.restore(session, model_path)
   else:
     logging.info("Created model with fresh parameters.")
     session.run(tf.initialize_all_variables())
-  return model, ckpt
+  return model
 
 def load_model(session, config):
   """Load translation model with single-step graph for decoding"""
@@ -114,12 +127,12 @@ def load_model(session, config):
   encoding_graph = model.create_encoding_graph()
   single_step_decoding_graph = model.create_single_step_decoding_graph(encoding_graph.outputs)
 
-  ckpt = tf.train.get_checkpoint_state(config['train_dir'])
-  if ckpt and gfile.Exists(ckpt.model_checkpoint_path):
-    logging.info("Reading model parameters from %s" % ckpt.model_checkpoint_path)
-    training_graph.saver.restore(session, ckpt.model_checkpoint_path)
+  model_path = get_model_path(config)
+  if model_path and gfile.Exists(model_path):
+    logging.info("Reading model parameters from %s" % model_path)
+    training_graph.saver.restore(session, model_path)
   else:
-    logging.fatal("Could not load model parameters from %s" % ckpt.model_checkpoint_path)
+    logging.fatal("Could not load model parameters from %s" % model_path)
 
   return model, training_graph, encoding_graph, single_step_decoding_graph, buckets
 

@@ -343,7 +343,7 @@ def train():
   """Train a en->fr translation model using WMT data."""
   # Prepare WMT data.
   logging.info("Preparing data in %s" % FLAGS.data_dir)
-  if (FLAGS.encoder == "bow" or FLAGS.encoder == "bow2") and FLAGS.src_lang == FLAGS.trg_lang:
+  if (FLAGS.encoder == "bow") and FLAGS.src_lang == FLAGS.trg_lang:
     logging.info("Preparing monolingual training data")
     if FLAGS.default_filenames:
       trg_train = os.path.join(FLAGS.data_dir, "train.ids." + FLAGS.trg_lang)
