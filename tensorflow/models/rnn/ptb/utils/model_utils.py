@@ -160,7 +160,7 @@ def create_model(session, config, eval_config, train_dir, optimizer):
     session.run(tf.initialize_all_variables())
   return model, mvalid, mtest
 
-def load_model(session, model_config, train_dir, use_log_probs=False):
+def load_model(session, model_config, path, use_log_probs=False):
   # Create and load model for decoding
   # If model_config is a path, read config from that path, else treat as config name
   if os.path.exists(model_config):
@@ -173,11 +173,19 @@ def load_model(session, model_config, train_dir, use_log_probs=False):
   with tf.variable_scope("model", reuse=None):
     model = RNNLMModel(is_training=False, config=config, use_log_probs=use_log_probs)
 
-  ckpt = tf.train.get_checkpoint_state(train_dir)
-  if ckpt and tf.gfile.Exists(ckpt.model_checkpoint_path):
-    logging.info("Reading model parameters from %s" % ckpt.model_checkpoint_path)
-    model.saver.restore(session, ckpt.model_checkpoint_path)
+  if os.path.isdir(path):
+    ckpt = tf.train.get_checkpoint_state(path)
+    if ckpt and tf.gfile.Exists(ckpt.model_checkpoint_path):
+      model_path = ckpt.model_checkpoint_path
+    else:
+      logging.error("Could not load model from directory %s." % path)
+      exit(1)
+  elif tf.gfile.Exists(path):
+    model_path = path
   else:
-    logging.error("Could not find model in directory %s." % train_dir)
+    logging.error("Could not load model %s." % path)
     exit(1)
+
+  logging.info("Reading model parameters from %s" % model_path)
+  model.saver.restore(session, model_path)
   return model, config
