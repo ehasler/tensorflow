@@ -170,7 +170,7 @@ def main(_):
       for epoch in range(start_epoch, config.max_max_epoch+1):
         if not (FLAGS.optimizer == "adadelta" or FLAGS.optimizer == "adam"):
           if start_idx == 0:
-            lr_decay = config.lr_decay ** max(epoch - config.max_epoch, 0.0)
+            lr_decay = config.lr_decay ** max(epoch - config.max_epoch+1, 0.0)
             model.assign_lr(session, config.learning_rate * lr_decay)
         logging.info("Epoch: %d Learning rate: %.3f" % (epoch, session.run(model.lr)))
 
