@@ -71,7 +71,9 @@ class Seq2SeqModel(object):
                rename_variable_prefix=None,
                init_const=False,
                use_bow_mask=False,
-               max_to_keep=0):
+               max_to_keep=0,
+               keep_prob=1.0,
+               initializer=None):
     """Create the model.
 
     Args:
@@ -134,13 +136,16 @@ class Seq2SeqModel(object):
       logging.info("Using maxout_layer=%r and full softmax loss" % maxout_layer)
 
     # Create the internal multi-layer cell for our RNN.
-    single_cell = tf.nn.rnn_cell.GRUCell(hidden_size)
     if use_lstm:
       logging.info("Using LSTM cells of size={}".format(hidden_size))
-      # NOTE: to use peephole connections, cell clipping or a projection layer, use LSTMCell instead
-      single_cell = tf.nn.rnn_cell.BasicLSTMCell(hidden_size)
+      if initializer:
+        single_cell = tf.nn.rnn_cell.LSTMCell(hidden_size, initializer=initializer)
+      else:
+        # NOTE: to use peephole connections, cell clipping or a projection layer, use LSTMCell instead
+        single_cell = tf.nn.rnn_cell.BasicLSTMCell(hidden_size)
     else:
       logging.info("Using GRU cells of size={}".format(hidden_size))
+      single_cell = tf.nn.rnn_cell.GRUCell(hidden_size)
     cell = single_cell
 
     if encoder == "bidirectional":
@@ -148,18 +153,17 @@ class Seq2SeqModel(object):
       if init_backward:
         logging.info("Use backward encoder state to initialize decoder state")
       cell = BidirectionalRNNCell([single_cell] * 2)
-    elif encoder == "bow" or encoder == "bow2":
-      logging.info("BOW model")            
+    elif encoder == "bow":
+      logging.info("BOW model")
+      if not forward_only and use_lstm and keep_prob < 1:
+        logging.info("Adding dropout wrapper around lstm cells")
+        single_cell = tf.nn.rnn_cell.DropoutWrapper(
+            single_cell, output_keep_prob=keep_prob)
       if num_layers > 1:
         logging.info("Model with %d layers for the decoder" % num_layers)
-        keep_prob = 0.35
-        if not forward_only and use_lstm and keep_prob < 1:
-          logging.info("Adding dropout wrapper around lstm cells")
-          single_cell = tf.nn.rnn_cell.DropoutWrapper(
-            single_cell, output_keep_prob=keep_prob)            
         cell = BOWCell(tf.nn.rnn_cell.MultiRNNCell([single_cell] * num_layers))
       else:
-        cell = BOWCell(single_cell)  
+        cell = BOWCell(single_cell)
     elif num_layers > 1:
       logging.info("Model with %d layers" % num_layers)
       cell = tf.nn.rnn_cell.MultiRNNCell([single_cell] * num_layers)
@@ -191,7 +195,8 @@ class Seq2SeqModel(object):
           bow_emb_size=hidden_size,
           scope=scope,
           init_const=init_const,
-          bow_mask=self.bow_mask)
+          bow_mask=self.bow_mask,
+          keep_prob=keep_prob)
 
     # Feeds for inputs.
     self.encoder_inputs = []

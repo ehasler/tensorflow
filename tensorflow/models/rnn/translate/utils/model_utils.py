@@ -102,6 +102,13 @@ def get_model_path(config):
     logging.error("You have to specify either --train_dir or --model_path")
     exit(1)
 
+def get_initializer(config):
+  if 'init_scale' in config and config['init_scale']:
+    logging.info("Using initializer tf.random_uniform_initializer(-{},{})".format(config['init_scale'],config['init_scale']))
+    initializer = tf.random_uniform_initializer(-config['init_scale'], config['init_scale'])
+    return initializer
+  return None
+
 def create_model(session, config, forward_only, rename_variable_prefix=None, buckets=None):
   """Create or load translation model for training or greedy decoding"""
   if not forward_only:
@@ -149,6 +156,8 @@ def get_Seq2SeqModel(config, buckets, forward_only, rename_variable_prefix=None)
       no_pad_symbol=config['no_pad_symbol'], variable_prefix=config['variable_prefix'], 
       init_const=config['bow_init_const'], use_bow_mask=config['use_bow_mask'],
       max_to_keep=config['max_to_keep'],
+      keep_prob=config['keep_prob'],
+      initializer=get_initializer(config),
       rename_variable_prefix=rename_variable_prefix)
 
 def get_singlestep_Seq2SeqModel(config, buckets):
@@ -163,7 +172,8 @@ def get_singlestep_Seq2SeqModel(config, buckets):
       maxout_layer=config['maxout_layer'], init_backward=config['init_backward'],
       no_pad_symbol=config['no_pad_symbol'],
       variable_prefix=config['variable_prefix'],
-      init_const=config['bow_init_const'], use_bow_mask=config['use_bow_mask'])
+      init_const=config['bow_init_const'], use_bow_mask=config['use_bow_mask'],
+      initializer=get_initializer(config))
 
 def rename_variable_prefix(config):
   logging.info("Rename model variables with prefix %s" % config['variable_prefix'])

@@ -126,17 +126,20 @@ def get_batch_ptr(model, train_idx_map, bucket_offset_pairs, current_batch_idx, 
   idx_map = train_idx_map[bucket_id]
 
   # This is for debugging only: make sure the order is preserved after reloading the model
+  global_step = model.global_step.eval()+1
+  if global_step % 100 == 0:
+    logging.info("Global step=%i" % global_step)
   if current_batch_idx+2 < len(bucket_offset_pairs) and (current_step+1) % steps_per_checkpt == 0:
     bucket_offset_pair_1 = bucket_offset_pairs[current_batch_idx+1]
     bucket_offset_pair_2 = bucket_offset_pairs[current_batch_idx+2]
     idx_map_1 = train_idx_map[bucket_offset_pair_1[0]]
     idx_map_2 = train_idx_map[bucket_offset_pair_2[0]]
-    logging.info("Global step={}, current batch idx={} bucket_id={}, offset={}-->{}, next two batch ptrs={},{}, {},{}" .format(model.global_step.eval()+1, current_batch_idx, \
+    logging.debug("Global step={}, current batch idx={} bucket_id={}, offset={}-->{}, next two batch ptrs={},{}, {},{}" .format(global_step, current_batch_idx, \
                   bucket_id, train_offset, idx_map[train_offset], \
                   bucket_offset_pair_1, idx_map_1[bucket_offset_pair_1[1]], \
                   bucket_offset_pair_2, idx_map_2[bucket_offset_pair_2[1]] ))
   else:
-    logging.info("Global step={}, current batch idx={} bucket_id={}, offset={}-->{}".format(model.global_step.eval()+1, current_batch_idx, bucket_id, train_offset, idx_map[train_offset] ))
+    logging.debug("Global step={}, current batch idx={} bucket_id={}, offset={}-->{}".format(global_step, current_batch_idx, bucket_id, train_offset, idx_map[train_offset] ))
   
   batch_ptr = { "offset": train_offset, "idx_map": idx_map }
   return bucket_id, batch_ptr
