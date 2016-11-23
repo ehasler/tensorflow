@@ -79,8 +79,9 @@ class BOWCell(RNNCell):
   def output_size(self):
     return self._cell.output_size
 
-  def embed(self, func, embedding_classes, embedding_size, inputs, dtype=None, scope=None):
-    embedder_cell = func(self._cell, embedding_classes, embedding_size)
+  def embed(self, func, embedding_classes, embedding_size, inputs, dtype=None, scope=None,
+            keep_prob=1.0, initializer=None):
+    embedder_cell = func(self._cell, embedding_classes, embedding_size, initializer=initializer)
 
     # Like rnn(..) in rnn.py, but we call only the Embedder, not the RNN cell
     outputs = []
@@ -91,6 +92,8 @@ class BOWCell(RNNCell):
       for time, input_ in enumerate(inputs):
         if time > 0: vs.get_variable_scope().reuse_variables()
         embedding = embedder_cell.__call__(input_, scope)
+        if keep_prob < 1:
+          embedding = tf.nn.dropout(embedding, keep_prob)
 
         # annotation = C~_t = tanh ( E(x_t) + b_c)
         b_c = tf.get_variable("annotation_b", [embedding_size])

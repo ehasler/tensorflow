@@ -406,6 +406,6 @@ def read_data(buckets, source_path, target_path, max_size=None, src_vcb_size=Non
           # Target will get additional GO symbol
           if len(source_ids) <= source_size and len(target_ids) < target_size:
             data_set[bucket_id].append([source_ids, target_ids])
-            break
+            break # skips training example if it fits in no bucket
         source, target = source_file.readline(), target_file.readline()
   return data_set

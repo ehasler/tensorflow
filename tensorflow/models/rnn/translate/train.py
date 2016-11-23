@@ -45,7 +45,9 @@ tf.app.flags.DEFINE_integer("steps_per_checkpoint", 200, "How many training step
 tf.app.flags.DEFINE_string("device", None, "Device to be used")
 tf.app.flags.DEFINE_string("variable_prefix", None, "Suffix to add to graph variable names")
 tf.app.flags.DEFINE_integer("max_to_keep", 5, "Number of saved models to keep (set to 0 to keep all models)")
+tf.app.flags.DEFINE_float("keep_prob", 1.0, "Probability of applying dropout to parameters")
 tf.app.flags.DEFINE_boolean("fixed_random_seed", False, "If True, use a fixed random seed to make training reproducible (affects matrix initialization)")
+tf.app.flags.DEFINE_float("init_scale", None, "Set the initial scale of the weights using tf.random_uniform_initializer")
 tf.app.flags.DEFINE_boolean("shuffle_data", True, "If False, do not shuffle the training data to make training reproducible")
 tf.app.flags.DEFINE_boolean("debug", True, "Add checks to make sure all examples in an epoch have been processed even if training was interrupted")
 tf.app.flags.DEFINE_boolean("self_test", False, "Run a self-test if this is set to True.")
@@ -118,7 +120,8 @@ def train(config):
     logging.info ("Reading development and training data (limit: %d)." % config['max_train_data_size'])
     train_set = data_utils.read_data(model_utils._buckets, src_train, trg_train, config['max_train_data_size'],
                                      src_vcb_size=config['src_vocab_size'],
-                                     trg_vcb_size=config['trg_vocab_size'])
+                                     trg_vcb_size=config['trg_vocab_size'],
+                                     add_src_eos=config['add_src_eos'])
     dev_set = data_utils.read_data(model_utils._buckets, src_dev, trg_dev,
                                    src_vcb_size=config['src_vocab_size'],
                                    trg_vcb_size=config['trg_vocab_size'],
