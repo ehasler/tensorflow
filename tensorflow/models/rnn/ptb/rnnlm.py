@@ -11,7 +11,8 @@ def log10(x):
 class RNNLMModel(object):
   """The RNNLM model. To use the model in decoding where we need probabilities, pass use_log_probs=True.
   """
-  def __init__(self, is_training, config, use_log_probs=False, optimizer="sgd"):
+  def __init__(self, config, variable_prefix, is_training, use_log_probs=False, optimizer="sgd",
+               rename_variable_prefix=None):
     self.batch_size = batch_size = config.batch_size
     self.num_steps = num_steps = config.num_steps
     hidden_size = config.hidden_size
@@ -104,8 +105,11 @@ class RNNLMModel(object):
         optimizer = tf.train.GradientDescentOptimizer(self.lr)
       self._train_op = optimizer.apply_gradients(zip(grads, tvars), global_step=self.global_step)
 
-    variable_prefix = "model"
     self.saver = tf.train.Saver({ v.op.name: v for v in tf.all_variables() if v.op.name.startswith(variable_prefix) })
+
+    if rename_variable_prefix:
+      self.saver_prefix = tf.train.Saver({ v.op.name.replace(variable_prefix, rename_variable_prefix): \
+        v for v in tf.all_variables() if v.op.name.startswith(variable_prefix) })
 
   def assign_lr(self, session, lr_value):
     session.run(tf.assign(self.lr, lr_value))

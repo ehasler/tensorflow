@@ -143,13 +143,13 @@ def read_config(config_file):
       logging.info("{}: {}".format(key, value))
   return config
 
-def create_model(session, config, eval_config, train_dir, optimizer):
+def create_model(session, config, eval_config, train_dir, optimizer, variable_prefix="model"):
   initializer = tf.random_uniform_initializer(-config.init_scale, config.init_scale)
-  with tf.variable_scope("model", reuse=None, initializer=initializer):
-    model = RNNLMModel(is_training=True, config=config, optimizer=optimizer)
-  with tf.variable_scope("model", reuse=True, initializer=initializer):
-    mvalid = RNNLMModel(is_training=False, config=config)
-    mtest = RNNLMModel(is_training=False, config=eval_config)
+  with tf.variable_scope(variable_prefix, reuse=None, initializer=initializer):
+    model = RNNLMModel(config, variable_prefix, is_training=True, optimizer=optimizer)
+  with tf.variable_scope(variable_prefix, reuse=True, initializer=initializer):
+    mvalid = RNNLMModel(config, variable_prefix, is_training=False)
+    mtest = RNNLMModel(eval_config, variable_prefix, is_training=False)
 
   ckpt = tf.train.get_checkpoint_state(train_dir)
   if ckpt and tf.gfile.Exists(ckpt.model_checkpoint_path):
@@ -160,7 +160,8 @@ def create_model(session, config, eval_config, train_dir, optimizer):
     session.run(tf.initialize_all_variables())
   return model, mvalid, mtest
 
-def load_model(session, model_config, path, use_log_probs=False):
+def load_model(session, model_config, path, use_log_probs=False,
+               variable_prefix="model", rename_variable_prefix=None):
   # Create and load model for decoding
   # If model_config is a path, read config from that path, else treat as config name
   if os.path.exists(model_config):
@@ -170,8 +171,10 @@ def load_model(session, model_config, path, use_log_probs=False):
   config.batch_size = 1
   config.num_steps = 1
 
-  with tf.variable_scope("model", reuse=None):
-    model = RNNLMModel(is_training=False, config=config, use_log_probs=use_log_probs)
+  with tf.variable_scope(variable_prefix, reuse=None):
+    model = RNNLMModel(config, variable_prefix, is_training=False,
+                       use_log_probs=use_log_probs,
+                       rename_variable_prefix=rename_variable_prefix)
 
   if os.path.isdir(path):
     ckpt = tf.train.get_checkpoint_state(path)
@@ -189,3 +192,15 @@ def load_model(session, model_config, path, use_log_probs=False):
   logging.info("Reading model parameters from %s" % model_path)
   model.saver.restore(session, model_path)
   return model, config
+
+def rename_variable_prefix(session, model_config, model_path, new_model_path,
+                           variable_prefix, rename_variable_prefix):
+  logging.info("Load model with variable_prefix=%s" % variable_prefix)
+  model, _ = load_model(session, model_config, model_path,
+                        variable_prefix=variable_prefix,
+                        rename_variable_prefix=rename_variable_prefix)
+
+  # Save model with new variable names
+  logging.info("Save model with variable_prefix=%s to path=%s using saver_prefix" %
+    (rename_variable_prefix, new_model_path))
+  model.saver_prefix.save(session, new_model_path)

@@ -81,15 +81,25 @@ flags.DEFINE_integer("steps_per_checkpoint", 200, "How many training steps to do
 flags.DEFINE_boolean("score", False, "Run rnnlm on test sentence and report logprobs")
 flags.DEFINE_boolean("fixed_random_seed", False, "If True, use a fixed random seed to make training reproducible (affects matrix initialization)")
 
+flags.DEFINE_string("variable_prefix", "model", "Set variable prefix for all model variables")
+flags.DEFINE_string("rename_variable_prefix", None, "Rename variable prefix for all model variables")
+flags.DEFINE_string("model_path", None, "Path to current model")
+flags.DEFINE_string("new_model_path", None, "Path to model with renamed variables")
+
 FLAGS = flags.FLAGS
 
 def main(_):
-  if not FLAGS.train_dir:
-    logging.error("Must set --train_dir")
-    exit(1)
-  if not FLAGS.data_dir and (not FLAGS.train_idx or not FLAGS.dev_idx):
-    logging.error("Must set --data_dir to PTB data directory or specify data using --train_idx,--dev_idx")
-    exit(1)
+  if FLAGS.rename_variable_prefix:
+    if not FLAGS.model_path or not FLAGS.new_model_path:
+      logging.error("Must set --model_path and --new_model_path to rename model variables")
+      exit(1)
+  else:
+    if not FLAGS.train_dir:
+      logging.error("Must set --train_dir")
+      exit(1)
+    if not FLAGS.data_dir and (not FLAGS.train_idx or not FLAGS.dev_idx):
+      logging.error("Must set --data_dir to PTB data directory or specify data using --train_idx,--dev_idx")
+      exit(1)
 
   logging.getLogger().setLevel(logging.INFO)
   logging.info("Start: {}".format(datetime.datetime.strftime(datetime.datetime.now(), '%Y-%m-%d %H:%M:%S')))
@@ -103,8 +113,11 @@ def main(_):
 
   with tf.Graph().as_default(), tf.Session(config=tf.ConfigProto(allow_soft_placement=allow_soft_placement, log_device_placement=log_device_placement)) \
     as session, tf.device(device):
-      
-    if FLAGS.score:
+
+    if FLAGS.rename_variable_prefix:
+      model_utils.rename_variable_prefix(session, FLAGS.config_file, FLAGS.model_path, FLAGS.new_model_path,
+                           FLAGS.variable_prefix, FLAGS.rename_variable_prefix)
+    elif FLAGS.score:
       logging.info("Run model in scoring mode")
       use_log_probs = True
       train_dir = "train.rnn.de"
