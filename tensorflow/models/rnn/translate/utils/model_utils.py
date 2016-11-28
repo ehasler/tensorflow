@@ -46,7 +46,7 @@ def process_args(FLAGS, train=True, greedy_decoder=False):
   if config['config_file']:
     read_config(config['config_file'], config)
 
-  if not config['train_dir']:
+  if train and not config['train_dir']:
      raise ValueError("Must set --train_dir")
 
   # Process specific args
