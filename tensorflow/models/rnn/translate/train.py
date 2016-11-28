@@ -128,7 +128,7 @@ def train(config):
                                    add_src_eos=config['add_src_eos'])
     tmpfile = config['train_dir']+"/tmp_idx.pkl"
     tmpfile_bookk = config['train_dir']+"/tmp_bookk.pkl"
-    train_buckets_scale, train_idx_map, bucket_offset_pairs, train_size, num_train_batches, bookk = \
+    train_buckets_scale, train_idx_map, bucket_offset_pairs, train_size, num_train_batches, bookk, epoch = \
       train_utils.prepare_buckets(model,
                                   train_set,
                                   tmpfile,
@@ -143,9 +143,6 @@ def train(config):
     current_eval_ppxs = [] # used for model saving
     current_bleu = 0 # used for model saving
     current_batch_idx = None
-    epoch = 1
-    if model.epoch > 1:
-      epoch = model.epoch
     while True:
       current_batch_idx = model.global_step.eval() % num_train_batches
       if current_batch_idx == 0:
@@ -165,7 +162,7 @@ def train(config):
             os.rename(tmpfile, tmpfile+".old")
           with open(tmpfile, "wb") as f:
             logging.info("Epoch %i, save training example permutation to path=%s" % (epoch,tmpfile))
-            pickle.dump((train_idx_map, bucket_offset_pairs), f, pickle.HIGHEST_PROTOCOL)
+            pickle.dump((train_idx_map, bucket_offset_pairs, epoch), f, pickle.HIGHEST_PROTOCOL)
 
         # Debugging: check if all training examples have been processed in the past epoch
         if config['debug']:
