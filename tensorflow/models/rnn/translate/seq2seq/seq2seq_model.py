@@ -76,7 +76,6 @@ class Seq2SeqModel(object):
       num_samples: number of samples for sampled softmax.
       forward_only: if set, we do not construct the backward pass in the model.
     """
-    self.epoch = 0
     self.source_vocab_size = source_vocab_size
     self.target_vocab_size = target_vocab_size
     self.buckets = buckets

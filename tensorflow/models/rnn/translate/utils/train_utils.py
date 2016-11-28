@@ -48,12 +48,13 @@ def prepare_buckets(model, train_set, tmpfile, tmpfile_bookk, train_sequential, 
       logging.info ("Total size of training set=%i" % train_size)
 
     bookk = defaultdict(dict)
+    epoch = 1
     # Try to restore saved shuffled train variables
     if train_sequential and model.global_step.eval() >= steps_per_checkpt:
       if tf.gfile.Exists(tmpfile):
         logging.info("Restore training example permutation from %s" % tmpfile)
         with open(tmpfile, "rb") as f:
-          train_idx_map, bucket_offset_pairs = pickle.load(f)
+          train_idx_map, bucket_offset_pairs, epoch = pickle.load(f)
         if tmpfile_bookk is not None:
           logging.info("Restore book keeping variable from %s" % tmpfile_bookk)
           with open(tmpfile_bookk, "rb") as f:
@@ -61,7 +62,7 @@ def prepare_buckets(model, train_set, tmpfile, tmpfile_bookk, train_sequential, 
             logging.info("Training examples processed so far: %i" % sum([ len(bookk[b].keys()) for b in bookk.keys() ]))
       else:
         logging.info("No file with training example permutation available, using new permutation.")
-    return train_buckets_scale, train_idx_map, bucket_offset_pairs, train_size, num_train_batches, bookk
+    return train_buckets_scale, train_idx_map, bucket_offset_pairs, train_size, num_train_batches, bookk, epoch
 
 def prepare_sequential(train_set, batch_size, shuffle_data):
   # Create a list of (bucket_id, off_set) tuples and walk through it sequentially,
