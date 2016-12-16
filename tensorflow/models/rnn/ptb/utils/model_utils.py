@@ -4,8 +4,6 @@ import tensorflow as tf
 
 from tensorflow.models.rnn.ptb.rnnlm import RNNLMModel
 
-class Config(object): pass
-
 class SmallConfig(object):
   """Small config."""
   init_scale = 0.1
@@ -130,7 +128,8 @@ def get_config(model_config):
     raise ValueError("Invalid model: %s", model_config)
 
 def read_config(config_file):
-  config = Config()
+  # Use MediumConfig as default
+  config = MediumConfig()
   logging.info("Settings from tensorflow config file:")  
   with open(config_file) as f:
     for line in f:
