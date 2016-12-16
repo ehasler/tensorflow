@@ -43,7 +43,7 @@ tf.app.flags.DEFINE_boolean("add_src_eos", False, "Add EOS symbol to all source 
 tf.app.flags.DEFINE_boolean("no_pad_symbol", False, "Only use GO, EOS, UNK, set PAD=-1")
 tf.app.flags.DEFINE_integer("steps_per_checkpoint", 200, "How many training steps to do per checkpoint.")
 tf.app.flags.DEFINE_string("device", None, "Device to be used")
-tf.app.flags.DEFINE_string("variable_prefix", None, "Suffix to add to graph variable names")
+tf.app.flags.DEFINE_string("variable_prefix", "nmt", "Prefix to add to graph variable names")
 tf.app.flags.DEFINE_integer("max_to_keep", 5, "Number of saved models to keep (set to 0 to keep all models)")
 tf.app.flags.DEFINE_float("keep_prob", 1.0, "Probability of applying dropout to parameters")
 tf.app.flags.DEFINE_boolean("fixed_random_seed", False, "If True, use a fixed random seed to make training reproducible (affects matrix initialization)")
@@ -91,7 +91,9 @@ tf.app.flags.DEFINE_float("max_gradient_norm", 1.0, "Clip gradients to this norm
 tf.app.flags.DEFINE_integer("batch_size", 80, "Batch size to use during training.")
 
 # Rename model variables
-tf.app.flags.DEFINE_bool("rename_variable_prefix", False, "Rename model variables with variable_prefix (assuming the model was saved with no prefix)")
+tf.app.flags.DEFINE_bool("rename_variable_prefix", False, "Rename model variables with variable_prefix (assuming the model was saved with default prefix)")
+tf.app.flags.DEFINE_string("model_path", None, "Path to trained model")
+tf.app.flags.DEFINE_string("new_model_path", None, "Path to trained model with renamed variables")
 
 FLAGS = tf.app.flags.FLAGS
 
@@ -169,7 +171,9 @@ def train(config):
           if epoch > 1 and bookk is not None:
             lengths = [ len(bookk[b].keys()) for b in bookk.keys() ]
             logging.info("After epoch %i: Total examples=%i, processed examples=%i" % (epoch-1, train_size, sum(lengths)))
-            assert train_size == sum(lengths), "ERROR: training set has not been fully processed"
+            #assert train_size == sum(lengths), "ERROR: training set has not been fully processed"
+            if train_size != sum(lengths):
+              logging.error("Training set has not been fully processed")
             bookk.clear()
 
         # Adjust learning rate independent of performance
@@ -267,7 +271,8 @@ def main(_):
   if FLAGS.self_test:
     self_test()
   else:
-    config = model_utils.process_args(FLAGS)
+    config = model_utils.process_args(FLAGS, train=False if FLAGS.rename_variable_prefix \
+                                                         else True)
     if config['rename_variable_prefix']:
       model_utils.rename_variable_prefix(config)
     else:
