@@ -105,11 +105,11 @@ class RNNLMModel(object):
         optimizer = tf.train.GradientDescentOptimizer(self.lr)
       self._train_op = optimizer.apply_gradients(zip(grads, tvars), global_step=self.global_step)
 
-    self.saver = tf.train.Saver({ v.op.name: v for v in tf.all_variables() if v.op.name.startswith(variable_prefix) })
+    self.saver = tf.train.Saver({ v.op.name: v for v in tf.all_variables() if v.op.name.startswith(variable_prefix) }, max_to_keep=2)
 
     if rename_variable_prefix:
       self.saver_prefix = tf.train.Saver({ v.op.name.replace(variable_prefix, rename_variable_prefix): \
-        v for v in tf.all_variables() if v.op.name.startswith(variable_prefix) })
+                                           v for v in tf.all_variables() if v.op.name.startswith(variable_prefix) }, max_to_keep=2)
 
   def assign_lr(self, session, lr_value):
     session.run(tf.assign(self.lr, lr_value))
