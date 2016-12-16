@@ -180,11 +180,10 @@ def rename_variable_prefix(config):
   with tf.Session() as session:
     # Create model and restore variable
     logging.info("Creating %d layers of %d units, encoder=%s." % (config['num_layers'], config['hidden_size'], config['encoder']))
-    rename_variable_prefix=config['variable_prefix']
-    config['variable_prefix'] = None
-    model, ckpt = create_model(session, config, forward_only=False, rename_variable_prefix=rename_variable_prefix)
+    rename_variable_prefix = config['variable_prefix']
+    config['variable_prefix'] = "nmt"
+    model = create_model(session, config, forward_only=False, rename_variable_prefix=rename_variable_prefix)
 
     # Save model with new variable names
-    checkpoint_path = os.path.join(config['train_dir']+"_mult", os.path.basename(ckpt.model_checkpoint_path))
-    print("Save model to path=%s using saver_prefix" % checkpoint_path)
-    model.saver_prefix.save(session, checkpoint_path)
+    print("Save model to path=%s using saver_prefix" % config['new_model_path'])
+    model.saver_prefix.save(session, config['new_model_path'])

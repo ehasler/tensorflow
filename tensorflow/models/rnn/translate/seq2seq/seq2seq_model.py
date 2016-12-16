@@ -265,7 +265,8 @@ class Seq2SeqModel(object):
 
     if rename_variable_prefix:
       # create a saver that explicitly stores model variables with a prefix
-      self.saver_prefix = tf.train.Saver({rename_variable_prefix+"/"+v.op.name: v for v in tf.all_variables()})
+      logging.info("Saving model with new prefix={}".format(rename_variable_prefix))
+      self.saver_prefix = tf.train.Saver({v.op.name.replace(variable_prefix, rename_variable_prefix): v for v in tf.all_variables()})
 
   def step(self, session, encoder_inputs, decoder_inputs, target_weights,
            bucket_id, forward_only, sequence_length=None, src_mask=None,
