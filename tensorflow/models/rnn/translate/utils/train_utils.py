@@ -157,12 +157,6 @@ def print_stats(model, loss, step_time, opt_algorithm):
            "%.2f" % (model.global_step.eval(),
                      step_time, perplexity))
 
-def save_checkpoint(session, model, train_dir, epoch):
- checkpoint_path = os.path.join(train_dir, "translate.ckpt")
- logging.info("Epoch %i, save model to path=%s after global step=%d" % (epoch, checkpoint_path, model.global_step.eval()))
- model.epoch = epoch
- model.saver.save(session, checkpoint_path, global_step=model.global_step)
-
 def run_eval(config, session, model, dev_set, current_eval_ppxs):
   logging.info("Run eval on development set")
   buckets = model_utils._buckets
@@ -219,9 +213,8 @@ def run_eval(config, session, model, dev_set, current_eval_ppxs):
       if eval_ppxs[b] < current_eval_ppxs[b]:
         num_improved += 1
 
-    checkpoint_path = os.path.join(config['train_dir'], "translate.ckpt-")
-    current_model = checkpoint_path + str(model.global_step.eval())
-    dev_ppx_model = checkpoint_path + "dev_ppx"
+    current_model = make_model_path(config, str(model.global_step.eval()))
+    dev_ppx_model = make_model_path(config, "dev_ppx")
     if num_improved == len(current_eval_ppxs):
       shutil.copy(current_model, dev_ppx_model)
       shutil.copy(current_model+".meta", dev_ppx_model+".meta")
@@ -245,9 +238,8 @@ def decode_dev(config, model, current_bleu):
   bleu = eval_set(out, ref)
 
   # If the current model improves over the results of the previous dev eval, overwrite the dev_bleu model
-  checkpoint_path = os.path.join(config['train_dir'], "translate.ckpt-")
-  current_model = checkpoint_path + str(model.global_step.eval())
-  dev_bleu_model = checkpoint_path + "dev_bleu"
+  current_model = make_model_path(config, str(model.global_step.eval()))
+  dev_bleu_model = make_model_path(config, "dev_bleu")
   if bleu > current_bleu:
     current_bleu = bleu
     shutil.copy(current_model, dev_bleu_model)
@@ -257,6 +249,9 @@ def decode_dev(config, model, current_bleu):
   else:
     logging.info("Model %s does not achieve higher BLEU, not updating %s" % (current_model, dev_bleu_model))
     return current_bleu
+
+def make_model_path(config, affix):
+  return os.path.join(config['train_dir'], "train.ckpt-"+affix)
 
 def eval_set(out, ref):
   # multi-bleu.pl [-lc] reference < hypothesis

@@ -95,6 +95,10 @@ tf.app.flags.DEFINE_bool("rename_variable_prefix", False, "Rename model variable
 tf.app.flags.DEFINE_string("model_path", None, "Path to trained model")
 tf.app.flags.DEFINE_string("new_model_path", None, "Path to trained model with renamed variables")
 
+# Model saving
+tf.app.flags.DEFINE_string("filetype", "ckpt", "File type of saved model, will be set to 'npz' internally if save_npz=true")
+tf.app.flags.DEFINE_boolean("save_npz", False, "Save model in npz format")
+
 FLAGS = tf.app.flags.FLAGS
 
 def train(config):
@@ -117,6 +121,12 @@ def train(config):
     if config['fixed_random_seed']:
       tf.set_random_seed(1234)
     model = model_utils.create_model(session, config, forward_only=False)
+
+    if config['save_npz']:
+      config['filetype'] = 'npz'
+      model_utils.save_model(session, config, model, epoch=-1)
+      logging.info("Saved model as npz file.")
+      exit(0)
 
     # Read data into buckets and prepare buckets for training
     logging.info ("Reading development and training data (limit: %d)." % config['max_train_data_size'])
@@ -205,7 +215,7 @@ def train(config):
       # Once in a while, we save a checkpoint, print statistics, and run evals.
       if current_step % config['steps_per_checkpoint'] == 0:
         train_utils.print_stats(model, loss, step_time, config['opt_algorithm'])
-        train_utils.save_checkpoint(session, model, config['train_dir'], epoch)
+        model_utils.save_model(session, config, model, epoch)
 
         # Debugging: save book keeping dict
         if config['debug']:
@@ -239,7 +249,7 @@ def train(config):
       if (config['max_train_batches'] > 0 and model.global_step.eval() >= config['max_train_batches']) or \
         (config['max_train_epochs'] > 0 and epoch == config['max_train_epochs'] and current_batch_idx + 1 == num_train_batches):
           if current_step % config['steps_per_checkpoint'] != 0:
-            train_utils.save_checkpoint(session, model, config['train_dir'], epoch)
+            model_utils.save_model(session, config, model, epoch)
           logging.info("Stopped training after %i epochs" % epoch)
           logging.info("Time: {}".format(datetime.datetime.strftime(datetime.datetime.now(), '%Y-%m-%d %H:%M:%S')))
           break

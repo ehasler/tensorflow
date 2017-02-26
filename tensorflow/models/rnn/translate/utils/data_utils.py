@@ -288,6 +288,9 @@ def get_training_data(config):
     logging.info("Preparing data in dir=%s" % config['data_dir'])
     src_train, trg_train, src_dev, trg_dev, _, _ = prepare_wmt_data(
       config['data_dir'], config['src_vocab_size'], config['trg_vocab_size'], tokenizer=None)
+  elif config['save_npz']:
+    # do not need data
+    return None, None, None, None
   else:
     if config['train_src_idx'] != None and config['train_trg_idx'] != None and \
       config['dev_src_idx'] != None and config['dev_trg_idx'] != None:

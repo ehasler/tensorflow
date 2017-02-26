@@ -1,9 +1,12 @@
+from __future__ import print_function
 from tensorflow.models.rnn.translate.utils import data_utils
 from tensorflow.models.rnn.translate.seq2seq import seq2seq_model, tf_seq2seq
 from tensorflow.python.platform import gfile
 import tensorflow as tf
 import os,re
 import logging
+import numpy
+from tensorflow.python.ops import array_ops
 
 # We use a number of buckets and pad to the closest one for efficiency.
 # See seq2seq_model.Seq2SeqModel for details of how they work.
@@ -185,5 +188,73 @@ def rename_variable_prefix(config):
     model = create_model(session, config, forward_only=False, rename_variable_prefix=rename_variable_prefix)
 
     # Save model with new variable names
-    print("Save model to path=%s using saver_prefix" % config['new_model_path'])
+    logging.info("Save model to path=%s using saver_prefix" % config['new_model_path'])
     model.saver_prefix.save(session, config['new_model_path'])
+
+def save_model(session, config, model, epoch):
+  if config['filetype'] == 'ckpt':
+    save_checkpoint(session, model, config['train_dir'], epoch)
+  else:
+    # if we have read the model from a specific path, use its epoch or name for the npz filename
+    if config['model_path']:
+      name = config['model_path'].split('-')[-1]
+    else:
+      name = model.global_step.eval()
+    save_npz(config['train_dir'], config['variable_prefix'], name)
+
+def save_checkpoint(session, model, train_dir, epoch):
+  checkpoint_path = os.path.join(train_dir, "train.ckpt")
+  global_step = model.global_step.eval()
+  logging.info("Epoch %i, save model to path=%s after global step=%d" % (epoch, checkpoint_path, global_step))
+  model.epoch = epoch
+  model.saver.save(session, checkpoint_path, global_step=global_step)
+
+def save_npz(train_dir, variable_prefix, name):
+  params_to_save = get_model_params(variable_prefix)
+  path = os.path.join(train_dir, "train."+str(name))
+  logging.info("Save model to path=%s.npz" % path)
+  numpy.savez(path, **params_to_save)
+  # save keys once
+  key_path = os.path.join(train_dir, "train.npz.keys")
+  if not os.path.exists(key_path):
+    with open(key_path, "w") as key_file:
+      for key in sorted(params_to_save.keys()):
+        print ((key, params_to_save[key].shape), file=key_file)
+
+def get_model_params(variable_prefix, split_lstm_matrices=True):
+  if variable_prefix:
+    exclude = [ variable_prefix+"/Variable", variable_prefix+"/Variable_1" ]
+    tmp = { v.op.name: v.eval() for v in tf.global_variables() if (v.op.name.startswith(variable_prefix) and v.op.name not in exclude) }
+  else:
+    exclude = [ "Variable", "Variable_1" ]
+    tmp = { v.op.name: v.eval() for v in tf.global_variables() if v.op.name not in exclude }
+  # Rename keys
+  params = {name.replace("/", "-"): param for name, param in tmp.items()}
+  if split_lstm_matrices:
+    for name in params.keys():
+     if "LSTMCell" in name:
+        # i = input_gate, j = new_input, f = forget_gate, o = output_gate
+        if "Matrix" in name:
+          i, j, f, o = array_ops.split(1, 4, params[name])
+        elif "Bias" in name:
+          i, j, f, o = array_ops.split(0, 4, params[name])
+        else:
+          logging.error("Unknown tensor type..")
+          exit(1)
+        name_i = name.replace("LSTMCell", "LSTMCell-i")
+        name_j = name.replace("LSTMCell", "LSTMCell-j")
+        name_f = name.replace("LSTMCell", "LSTMCell-f")
+        name_o = name.replace("LSTMCell", "LSTMCell-o")
+        params[name_i] = i.eval()
+        params[name_j] = j.eval()
+        params[name_f] = f.eval()
+        params[name_o] = o.eval()
+        del params[name]
+  return params
+
+def get_npz_path(train_dir):
+  npz_path = os.path.join(train_dir, "npzpath")
+  if os.path.exists(npz_path):
+    with open(npz_path) as f:
+      return f.readline().rstrip()
+  return None
