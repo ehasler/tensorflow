@@ -27,10 +27,10 @@ class BidirectionalRNNCell(RNNCell):
     if not cells or len(cells) != 2:
       raise ValueError("Must specify exactly two cells for BidirectionalRNNCell.")
     self._cells = cells
-        
+
   @property
   def state_size(self):
-    return sum([cell.state_size for cell in self._cells])
+    return sum([cell.state_size[0] for cell in self._cells])
 
   @property
   def output_size(self):
@@ -40,7 +40,7 @@ class BidirectionalRNNCell(RNNCell):
   def fw_state_size(self):
     return self._cells[0].state_size
 
-  @property    
+  @property
   def fw_output_size(self):
     return self._cells[0].output_size
 

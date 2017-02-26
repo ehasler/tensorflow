@@ -742,7 +742,7 @@ def attention_decoder(decoder_inputs,
         # This tries to imitate the blocks Readout layer, consisting of Merge, Bias, Maxout, Linear, Linear
         # Merge: cell.output_size
         with tf.variable_scope("AttnMergeProjection"):
-          merge_output = rnn_cell.linear([cell_output] + [inp] + attns, cell.output_size, True)
+          merge_output = linear([cell_output] + [inp] + attns, cell.output_size, True)
 
         # Bias
         b = tf.get_variable("maxout_b", [cell.output_size])
@@ -758,11 +758,11 @@ def attention_decoder(decoder_inputs,
 
         # Linear, softmax0 (maxout_size --> embedding_size ), without bias
         with tf.variable_scope("MaxoutOutputProjection_0"):
-          output_embed = rnn_cell.linear([maxout_output], embedding_size, False)
+          output_embed = linear([maxout_output], embedding_size, False)
 
         # Linear, softmax1 (embedding_size --> vocab_size), with bias
         with tf.variable_scope("MaxoutOutputProjection_1"):
-          output = rnn_cell.linear([output_embed], output_size, True)
+          output = linear([output_embed], output_size, True)
       else:
         with variable_scope.variable_scope("AttnOutputProjection"):
           output = linear([cell_output] + attns, output_size, True) # calculate the output
@@ -794,7 +794,7 @@ def embedding_attention_decoder(decoder_inputs,
                                 update_embedding_for_previous=True,
                                 dtype=None,
                                 scope=None,
-                                initial_state_attention=False):
+                                initial_state_attention=False,
                                 src_mask=None,
                                 maxout_layer=False,
                                 encoder="reverse",
@@ -1004,7 +1004,7 @@ def embedding_attention_seq2seq(encoder_inputs,
     if isinstance(feed_previous, bool):
       return embedding_attention_decoder(
           decoder_inputs,
-          encoder_state,
+          initial_state,
           attention_states,
           cell,
           num_decoder_symbols,
@@ -1027,7 +1027,7 @@ def embedding_attention_seq2seq(encoder_inputs,
           variable_scope.get_variable_scope(), reuse=reuse) as scope:
         outputs, state = embedding_attention_decoder(
             decoder_inputs,
-            encoder_state,
+            initial_state,
             attention_states,
             cell,
             num_decoder_symbols,
@@ -1038,7 +1038,11 @@ def embedding_attention_seq2seq(encoder_inputs,
             feed_previous=feed_previous_bool,
             update_embedding_for_previous=False,
             initial_state_attention=initial_state_attention,
-            src_mask=src_mask, maxout_layer=maxout_layer, encoder=encoder)
+            src_mask=src_mask,
+            maxout_layer=maxout_layer,
+            encoder=encoder,
+            init_const=init_const,
+            bow_mask=bow_mask)
         state_list = [state]
         if nest.is_sequence(state):
           state_list = nest.flatten(state)

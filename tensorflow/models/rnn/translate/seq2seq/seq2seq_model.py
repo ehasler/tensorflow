@@ -29,6 +29,7 @@ from tensorflow.models.rnn.translate.utils import data_utils
 from tensorflow.models.rnn.translate.seq2seq.wrapper_cells import BidirectionalRNNCell, BOWCell
 
 import logging
+from tensorflow.core.protobuf import saver_pb2
 
 class Seq2SeqModel(object):
   """Sequence-to-sequence model with attention and for multiple buckets.
@@ -288,14 +289,17 @@ class Seq2SeqModel(object):
     if variable_prefix:
       # save only the variables that belong to the prefix
       logging.info("Using variable prefix={}".format(variable_prefix))
-      self.saver = tf.train.Saver({ v.op.name: v for v in tf.all_variables() if v.op.name.startswith(variable_prefix) }, max_to_keep=max_to_keep)
+      self.saver = tf.train.Saver({ v.op.name: v for v in tf.global_variables() if v.op.name.startswith(variable_prefix) }, max_to_keep=max_to_keep,
+                                  write_version=saver_pb2.SaverDef.V1)
     else:
-      self.saver = tf.train.Saver(tf.all_variables(), max_to_keep=max_to_keep)
+      self.saver = tf.train.Saver(tf.global_variables(), max_to_keep=max_to_keep,
+                                  write_version=saver_pb2.SaverDef.V1)
 
     if rename_variable_prefix:
       # create a saver that explicitly stores model variables with a prefix
       logging.info("Saving model with new prefix={}".format(rename_variable_prefix))
-      self.saver_prefix = tf.train.Saver({v.op.name.replace(variable_prefix, rename_variable_prefix): v for v in tf.all_variables()})
+      self.saver_prefix = tf.train.Saver({v.op.name.replace(variable_prefix, rename_variable_prefix): v for v in tf.global_variables()},
+                                         write_version=saver_pb2.SaverDef.V1)
 
   def step(self, session, encoder_inputs, decoder_inputs, target_weights,
            bucket_id, forward_only, sequence_length=None, src_mask=None,

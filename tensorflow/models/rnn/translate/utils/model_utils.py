@@ -123,7 +123,7 @@ def create_model(session, config, forward_only, rename_variable_prefix=None, buc
     model.saver.restore(session, model_path)
   else:
     logging.info("Created model with fresh parameters.")
-    session.run(tf.initialize_all_variables())
+    session.run(tf.global_variables_initializer())
   return model
 
 def load_model(session, config):
