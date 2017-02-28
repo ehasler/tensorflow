@@ -508,7 +508,8 @@ def _reverse_seq(input_seq, lengths):
 
 def bidirectional_rnn(cell_fw, cell_bw, inputs,
                       initial_state_fw=None, initial_state_bw=None,
-                      dtype=None, sequence_length=None, scope=None, bucket_length=None):
+                      dtype=None, sequence_length=None, scope=None, bucket_length=None,
+                      legacy=False):
   """Creates a bidirectional recurrent neural network.
 
   Similar to the unidirectional case above (rnn) but takes input and builds
@@ -559,17 +560,30 @@ def bidirectional_rnn(cell_fw, cell_bw, inputs,
   if not inputs:
     raise ValueError("inputs must not be empty")
 
-  with vs.variable_scope(scope or "BiRNN"):
-    # Forward direction
-    with vs.variable_scope("FW") as fw_scope:
+  if legacy:
+    # read legacy models
+    with vs.variable_scope(scope or "BiRNN_FW") as fw_scope:
+      # Forward direction
       output_fw, output_state_fw = rnn(cell_fw, inputs, initial_state_fw, dtype,
                                        sequence_length, scope=fw_scope)
 
-    # Backward direction
-    with vs.variable_scope("BW") as bw_scope:
+    with vs.variable_scope(scope or "BiRNN_BW") as bw_scope:
+      # Backward direction
       reversed_inputs = _reverse_seq(inputs, sequence_length)
       tmp, output_state_bw = rnn(cell_bw, reversed_inputs, initial_state_bw,
                                  dtype, sequence_length, scope=bw_scope)
+  else:
+    with vs.variable_scope(scope or "BiRNN"):
+      # Forward direction
+      with vs.variable_scope("FW") as fw_scope:
+        output_fw, output_state_fw = rnn(cell_fw, inputs, initial_state_fw, dtype,
+                                         sequence_length, scope=fw_scope)
+
+      # Backward direction
+      with vs.variable_scope("BW") as bw_scope:
+        reversed_inputs = _reverse_seq(inputs, sequence_length)
+        tmp, output_state_bw = rnn(cell_bw, reversed_inputs, initial_state_bw,
+                                   dtype, sequence_length, scope=bw_scope)
 
   output_bw = _reverse_seq(tmp, sequence_length)
 

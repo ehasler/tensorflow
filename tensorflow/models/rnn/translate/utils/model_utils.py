@@ -154,14 +154,15 @@ def get_Seq2SeqModel(config, buckets, forward_only, rename_variable_prefix=None)
       config['learning_rate'], config['learning_rate_decay_factor'], use_lstm=config['use_lstm'],
       num_samples=config['num_samples'], forward_only=forward_only,
       opt_algorithm=config['opt_algorithm'], encoder=config['encoder'],
-      use_sequence_length=config['use_seqlen'], use_src_mask=config['use_src_mask'], 
-      maxout_layer=config['maxout_layer'], init_backward=config['init_backward'], 
-      no_pad_symbol=config['no_pad_symbol'], variable_prefix=config['variable_prefix'], 
+      use_sequence_length=config['use_seqlen'], use_src_mask=config['use_src_mask'],
+      maxout_layer=config['maxout_layer'], init_backward=config['init_backward'],
+      no_pad_symbol=config['no_pad_symbol'], variable_prefix=config['variable_prefix'],
       init_const=config['bow_init_const'], use_bow_mask=config['use_bow_mask'],
       max_to_keep=config['max_to_keep'],
       keep_prob=config['keep_prob'],
       initializer=get_initializer(config),
-      rename_variable_prefix=rename_variable_prefix)
+      rename_variable_prefix=rename_variable_prefix,
+      legacy=config['legacy'])
 
 def get_singlestep_Seq2SeqModel(config, buckets):
   return tf_seq2seq.TFSeq2SeqEngine(

@@ -77,6 +77,7 @@ tf.app.flags.DEFINE_string("encoder", "reverse", "Select encoder from 'reverse',
                             "(default for tensorflow), the bidirectional encoder creates both forward and backward states and "
                             "concatenates them (like the Bahdanau model)")
 tf.app.flags.DEFINE_boolean("init_backward", False, "When using the bidirectional encoder, initialise the hidden decoder state from the backward encoder state (default: forward).")                            
+tf.app.flags.DEFINE_boolean("legacy", False, "Read legacy models with slightly different variable scopes")
 
 # Extra model configuration for BOW model
 tf.app.flags.DEFINE_boolean("bow_init_const", False, "Learn an initialisation matrix for the decoder instead of taking the average of source embeddings")

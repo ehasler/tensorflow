@@ -898,7 +898,8 @@ def embedding_attention_seq2seq(encoder_inputs,
                                 init_const=False,
                                 bow_mask=None,
                                 keep_prob=1.0,
-                                initializer=None):
+                                initializer=None,
+                                legacy=False):
   """Embedding sequence-to-sequence model with attention.
 
   This model first embeds encoder_inputs by a newly created embedding (of shape
@@ -958,7 +959,8 @@ def embedding_attention_seq2seq(encoder_inputs,
       encoder_outputs, encoder_state, encoder_state_bw = rnn.bidirectional_rnn(encoder_cell_fw, encoder_cell_bw,
                                  encoder_inputs, dtype=dtype,
                                  sequence_length=sequence_length,
-                                 bucket_length=bucket_length)
+                                 bucket_length=bucket_length,
+                                 legacy=legacy)
 
       logging.debug("Bidirectional state size=%d" % cell.state_size) # this shows double the size for lstms
     elif encoder == "reverse":

@@ -74,7 +74,8 @@ class Seq2SeqModel(object):
                use_bow_mask=False,
                max_to_keep=0,
                keep_prob=1.0,
-               initializer=None):
+               initializer=None,
+               legacy=False):
     """Create the model.
 
     Args:
@@ -196,7 +197,8 @@ class Seq2SeqModel(object):
           scope=scope,
           init_const=init_const,
           bow_mask=self.bow_mask,
-          keep_prob=keep_prob)
+          keep_prob=keep_prob,
+          legacy=legacy)
 
     # Feeds for inputs.
     self.encoder_inputs = []
