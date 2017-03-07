@@ -231,9 +231,10 @@ def get_model_params(variable_prefix, split_lstm_matrices=True):
     tmp = { v.op.name: v.eval() for v in tf.global_variables() if v.op.name not in exclude }
   # Rename keys
   params = {name.replace("/", "-"): param for name, param in tmp.items()}
+  has_initializer = False
   if split_lstm_matrices:
     for name in params.keys():
-     if "LSTMCell" in name:
+      if "LSTMCell" in name:
         # i = input_gate, j = new_input, f = forget_gate, o = output_gate
         if "Matrix" in name:
           i, j, f, o = array_ops.split(1, 4, params[name])
@@ -251,6 +252,19 @@ def get_model_params(variable_prefix, split_lstm_matrices=True):
         params[name_f] = f.eval()
         params[name_o] = o.eval()
         del params[name]
+      elif "AttnV" in name:
+        params[name] = array_ops.reshape(params[name], [ params[name].shape[0], 1 ]).eval()
+      elif "AttnW" in name:
+        # remove dims of size 1
+        params[name] = tf.squeeze(params[name]).eval()
+      elif name == "nmt-embedding_attention_seq2seq-Linear-Matrix":
+        has_initializer = True
+  if not has_initializer:
+    from tensorflow.python.framework import dtypes
+    m = array_ops.ones((1000, 1000), dtype=dtypes.float32)
+    b = array_ops.zeros(1000, dtype=dtypes.float32)
+    params["nmt-embedding_attention_seq2seq-Linear-Matrix"] = m.eval()
+    params["nmt-embedding_attention_seq2seq-Linear-Bias"] = b.eval()
   return params
 
 def get_npz_path(train_dir):
