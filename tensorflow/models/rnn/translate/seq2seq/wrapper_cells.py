@@ -30,7 +30,11 @@ class BidirectionalRNNCell(RNNCell):
 
   @property
   def state_size(self):
-    return sum([cell.state_size[0] for cell in self._cells])
+    self._cells[0]._state_is_tuple
+    if self._cells[0]._state_is_tuple:
+      return sum([cell.state_size[0]+cell.state_size[1] for cell in self._cells])
+    else:
+      return sum([cell.state_size for cell in self._cells])
 
   @property
   def output_size(self):
@@ -38,7 +42,10 @@ class BidirectionalRNNCell(RNNCell):
 
   @property
   def fw_state_size(self):
-    return self._cells[0].state_size
+    if self._cells[0]._state_is_tuple:
+      return self._cells[0].state_size[0]+self._cells[0].state_size[1]
+    else:
+      return self._cells[0].state_size
 
   @property
   def fw_output_size(self):

@@ -324,7 +324,6 @@ class BasicLSTMCell(RNNCell):
         new_state = array_ops.concat(1, [new_c, new_h])
       return new_h, new_state
 
-
 def _get_concat_variable(name, shape, dtype, num_shards):
   """Get a sharded variable concatenated into one tensor."""
   sharded_variable = _get_sharded_variable(name, shape, dtype, num_shards)
