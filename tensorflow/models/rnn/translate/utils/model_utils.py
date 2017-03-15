@@ -177,7 +177,8 @@ def get_singlestep_Seq2SeqModel(config, buckets):
       no_pad_symbol=config['no_pad_symbol'],
       variable_prefix=config['variable_prefix'],
       init_const=config['bow_init_const'], use_bow_mask=config['use_bow_mask'],
-      initializer=get_initializer(config))
+      initializer=get_initializer(config),
+      legacy=config['legacy'])
 
 def rename_variable_prefix(config):
   logging.info("Rename model variables with prefix %s" % config['variable_prefix'])
