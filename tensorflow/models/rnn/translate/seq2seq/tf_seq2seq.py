@@ -53,6 +53,10 @@ class TFSeq2SeqEngine(Engine):
                  maxout_layer=False, init_backward=False, no_pad_symbol=False,
                  variable_prefix=None, init_const=False, use_bow_mask=False,
                  initializer=None,
+                 blocks_compat_mode=False,
+                 learn_state_transform=False,
+                 single_src_embedding=False,
+                 compute_attn_first=False,
                  legacy=False):
         self.source_vocab_size = source_vocab_size
         self.target_vocab_size = target_vocab_size
@@ -77,6 +81,7 @@ class TFSeq2SeqEngine(Engine):
         self.variable_prefix = variable_prefix
         self.init_const = init_const
         self.use_bow_mask = use_bow_mask
+        self.single_src_embedding = single_src_embedding
         self.initializer = initializer
         self.dtype = dtype
                         
@@ -94,16 +99,16 @@ class TFSeq2SeqEngine(Engine):
                 self.embedding_size, self.hidden_size, self.num_layers, self.max_gradient_norm, self.batch_size, self.learning_rate,
                 self.learning_rate_decay_factor, self.use_lstm, self.num_samples, self.forward_only, self.dtype, self.opt_algorithm, self.encoder,
                 self.use_sequence_length, self.use_src_mask, self.maxout_layer, self.init_backward, self.no_pad_symbol, self.variable_prefix,
-                self.init_const, self.use_bow_mask, self.initializer)
+                self.init_const, self.use_bow_mask, self.single_src_embedding, self.initializer)
     
     def create_encoding_graph(self):
       '''
       The returned TFGraph represents the encoding. The output tensors must
       be compatible with the input tensors for create_single_step_decoding_graph.
       '''
-      logging.info("Create encoding graph")    
+      logging.info("Create encoding graph")
       self.encoding_graph = TFSeq2SeqEncodingGraph(self.source_vocab_size, self.buckets, self.embedding_size, self.hidden_size, 
-               self.num_layers, self.batch_size, self.use_lstm, self.num_samples, self.encoder, self.use_sequence_length, self.init_backward,
+               self.num_layers, self.batch_size, self.use_lstm, self.num_samples, self.encoder, self.use_sequence_length, self.init_backward, self.single_src_embedding,
                self.variable_prefix, self.initializer)
       return self.encoding_graph
     
@@ -126,14 +131,14 @@ class TFSeq2SeqTrainingGraph(TrainGraph):
                  learning_rate_decay_factor, use_lstm=False,
                  num_samples=512, forward_only=False, dtype=tf.float32, opt_algorithm="sgd", encoder="reverse",
                  use_sequence_length=False, use_src_mask=False, maxout_layer=False, init_backward=False, no_pad_symbol=False,
-                 variable_prefix=None, init_const=False, use_bow_mask=False, initializer=None):
+                 variable_prefix=None, init_const=False, use_bow_mask=False, single_src_embedding=False, initializer=None):
         super(TFSeq2SeqTrainingGraph, self).__init__(buckets, batch_size)
         self.seq2seq_model = Seq2SeqModel(source_vocab_size, target_vocab_size, buckets, embedding_size, hidden_size,
                  num_layers, max_gradient_norm, batch_size, learning_rate,
                  learning_rate_decay_factor, use_lstm,
                  num_samples, forward_only, dtype, opt_algorithm, encoder,
                  use_sequence_length, use_src_mask, maxout_layer, init_backward, no_pad_symbol, variable_prefix,
-                 init_const=init_const, use_bow_mask=use_bow_mask, initializer=initializer)
+                 init_const=init_const, use_bow_mask=use_bow_mask, single_src_embedding=single_src_embedding, initializer=initializer)
 
         self.learning_rate = self.seq2seq_model.learning_rate
         self.global_step = self.seq2seq_model.global_step
@@ -166,11 +171,12 @@ class TFSeq2SeqEncodingGraph(EncodingGraph):
     def __init__(self, source_vocab_size, buckets, embedding_size, hidden_size,
                  num_layers, batch_size, use_lstm=False, num_samples=512, 
                  encoder="reverse", use_sequence_length=False, init_backward=False,
+                 single_src_embedding=False,
                  variable_prefix=None, initializer=None):
         super(TFSeq2SeqEncodingGraph, self).__init__(buckets, batch_size)
         self.source_vocab_size = source_vocab_size
         self.num_heads = 1
-    
+
         # Create the internal multi-layer cell for our RNN.
         if use_lstm:
           logging.info("Using LSTM cells of size={}".format(hidden_size))
@@ -212,6 +218,7 @@ class TFSeq2SeqEncodingGraph(EncodingGraph):
                                                           bucket_length=bucket_length,
                                                           init_backward=init_backward,
                                                           bow_emb_size=hidden_size,
+                                                          single_src_embedding=single_src_embedding,
                                                           scope=scope)
     
         # Feeds for inputs.
@@ -278,7 +285,8 @@ class TFSeq2SeqEncodingGraph(EncodingGraph):
                                     sequence_length=None,
                                     bucket_length=None,
                                     init_backward=False,
-                                    bow_emb_size=None):
+                                    bow_emb_size=None,
+                                    single_src_embedding=False):
         """Embedding sequence-to-sequence model with attention.
         """
         with tf.variable_scope(scope or "embedding_attention_seq2seq", reuse=True):    
@@ -287,9 +295,15 @@ class TFSeq2SeqEncodingGraph(EncodingGraph):
               encoder_cell_fw = rnn_cell.EmbeddingWrapper(
                 cell.get_fw_cell(), embedding_classes=num_encoder_symbols,
                 embedding_size=embedding_size)
+              embed_scope = None
+              if single_src_embedding:
+                logging.info("Reuse forward src embedding for backward encoder")
+                with variable_scope.variable_scope("BiRNN/FW/EmbeddingWrapper") as es:
+                  embed_scope = es
+
               encoder_cell_bw = rnn_cell.EmbeddingWrapper(
                 cell.get_bw_cell(), embedding_classes=num_encoder_symbols,
-                embedding_size=embedding_size)        
+                embedding_size=embedding_size, embed_scope=embed_scope)
               encoder_outputs, encoder_state, encoder_state_bw = rnn.bidirectional_rnn(encoder_cell_fw, encoder_cell_bw, 
                                  encoder_inputs, dtype=dtype, 
                                  sequence_length=sequence_length,
