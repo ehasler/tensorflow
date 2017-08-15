@@ -283,8 +283,9 @@ def main(_):
   if FLAGS.self_test:
     self_test()
   else:
+    import sys
     config = model_utils.process_args(FLAGS, train=False if FLAGS.rename_variable_prefix \
-                                                         else True)
+                                                         else True, cmdline_args=sys.argv)
     if config['rename_variable_prefix']:
       model_utils.rename_variable_prefix(config)
     else:

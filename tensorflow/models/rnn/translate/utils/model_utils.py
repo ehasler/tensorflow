@@ -11,43 +11,60 @@ from tensorflow.python.ops import array_ops
 # We use a number of buckets and pad to the closest one for efficiency.
 # See seq2seq_model.Seq2SeqModel for details of how they work.
 # Default buckets:
-_buckets = [(5, 10), (10, 15), (20, 25), (40, 50)] 
+_buckets = [(5, 10), (10, 15), (20, 25), (40, 50)]
 
-def read_config(config_file, config):
+def get_typed_value(value):
   def is_bool(v):
     return v.lower() in ('true', 't', 'false', 'f')
 
   def str2bool(v):
-    return v.lower() in ('true', 't')  
-  
+    return v.lower() in ('true', 't')
+
+  if value == "None":
+    return None
+  elif is_bool(value):
+    return str2bool(value)
+  elif re.match("^\d+$", value):
+    return int(value)
+  elif re.match("^[\d\.]+$", value):
+    return float(value)
+  return value
+
+def read_config(config_file, config):
   if not config_file or not os.path.isfile(config_file):
     raise ValueError("Cannot load config file %s" % config_file)
 
-  logging.info("Settings from tensorflow config file:")    
+  logging.info("Settings from tensorflow config file:")
   with open(config_file) as f:
     for line in f:
       key,value = line.strip().split(": ")
-      if value == "None":
-        value = None
-      elif is_bool(value):
-        value = str2bool(value)      
-      elif re.match("^\d+$", value):
-        value = int(value)
-      elif re.match("^[\d\.]+$", value):
-        value = float(value)
-      config[key] = value
+      config[key] = get_typed_value(value)
       logging.info("{}: {}".format(key, value))
 
-def process_args(FLAGS, train=True, greedy_decoder=False):
+def process_cmdline_args(args, config):
+  logging.info("Settings from cmdline:")
+  for arg in args:
+    m = re.match("^\-\-(.*)=(.*)$", arg)
+    if m:
+      key = m.group(1)
+      value = m.group(2)
+      config[key] = get_typed_value(value)
+      logging.info("{}: {}".format(key, value))
+
+def process_args(FLAGS, train=True, greedy_decoder=False, cmdline_args=None):
   config = dict()
 
-  # First read command line flags
+  # First read (all) command line flags
   for key,value in FLAGS.__dict__['__flags'].iteritems():
     config[key] = value
 
   # Then read config file if available
   if config['config_file']:
     read_config(config['config_file'], config)
+
+  # Then overwrite settings with flags that were actually passed on the cmdline
+  if cmdline_args:
+    process_cmdline_args(cmdline_args, config)
 
   if train and not config['train_dir']:
      raise ValueError("Must set --train_dir")
