@@ -235,7 +235,7 @@ def decode_dev(config, model, current_bleu):
   with g2.as_default() as g:
     from tensorflow.models.rnn.translate.decode import decode
     decode(config, input=inp, output=out, max_sentences=config['eval_bleu_size'])
-  bleu = eval_set(out, ref)
+  bleu = eval_set(config, out, ref)
 
   # If the current model improves over the results of the previous dev eval, overwrite the dev_bleu model
   current_model = make_model_path(config, str(model.global_step.eval()))
@@ -253,12 +253,12 @@ def decode_dev(config, model, current_bleu):
 def make_model_path(config, affix):
   return os.path.join(config['train_dir'], "train.ckpt-"+affix)
 
-def eval_set(out, ref):
+def eval_set(config, out, ref):
   # multi-bleu.pl [-lc] reference < hypothesis
   import subprocess
   cat = subprocess.Popen(("cat", out), stdout=subprocess.PIPE)
   try:
-    multibleu = subprocess.check_output(("../scripts/multi-bleu.perl", "-lc",
+    multibleu = subprocess.check_output((config['multi_bleu_path'], "-lc",
                                        ref), stdin=cat.stdout)
     logging.info("{}".format(multibleu))
     import re

@@ -21,7 +21,7 @@ tf.app.flags.DEFINE_string("config_file", None, "Pass options in a config file (
 # Training settings
 tf.app.flags.DEFINE_string("src_lang", "en", "Source language")
 tf.app.flags.DEFINE_string("trg_lang", "de", "Target language")
-tf.app.flags.DEFINE_string("train_dir", None, "Training directory.")
+tf.app.flags.DEFINE_string("train_dir", "train", "Training directory.")
 tf.app.flags.DEFINE_string("data_dir", "/tmp", "Data directory if data needs to be prepared")
 tf.app.flags.DEFINE_boolean("use_default_data", False, "If set, download and prepare Gigaword data set instead of providing custom train/dev/test data. That data will be tokenized first.")
 tf.app.flags.DEFINE_string("train_src", None, "Source side of training data")
@@ -60,6 +60,7 @@ tf.app.flags.DEFINE_integer("eval_size", 80, "The number of examples to evaluate
 tf.app.flags.DEFINE_boolean("eval_bleu", False, "If True, decode dev set and measure BLEU instead of measuring perplexities")
 tf.app.flags.DEFINE_integer("eval_bleu_size", 0, "The number of dev sentences to translate (all if set to 0)")
 tf.app.flags.DEFINE_integer("eval_bleu_start", 10000, "Number of batches before starting BLEU evaluation on dev")
+tf.app.flags.DEFINE_string("multi_bleu_path", "../scripts/multi-bleu.perl", "Path to multi-bleu script")
 
 # Model configuration
 tf.app.flags.DEFINE_integer("src_vocab_size", 40000, "Source vocabulary size.")
@@ -118,7 +119,12 @@ def train(config):
     device = '/'+config['device']
   logging.info("Use device %s" % device)
 
-  with tf.Session(config=tf.ConfigProto(allow_soft_placement=allow_soft_placement, log_device_placement=log_device_placement)) as session, tf.device(device):
+  gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.5)
+  gpu_options = tf.GPUOptions(allow_growth=True)
+  with tf.Session(config=tf.ConfigProto(allow_soft_placement=allow_soft_placement, log_device_placement=log_device_placement, gpu_options=gpu_options)) as session, tf.device(device):
+    if not os.path.exists(config['train_dir']):
+      os.makedirs(config['train_dir'])
+
     # Create model
     if config['fixed_random_seed']:
       tf.set_random_seed(1234)
@@ -155,7 +161,7 @@ def train(config):
     current_step = model.global_step.eval()
     previous_losses = [] # used for updating learning rate (train loss)
     current_eval_ppxs = [] # used for model saving
-    current_bleu = 0 # used for model saving
+    current_bleu = -1 # used for model saving
     current_batch_idx = None
     while True:
       current_batch_idx = model.global_step.eval() % num_train_batches
