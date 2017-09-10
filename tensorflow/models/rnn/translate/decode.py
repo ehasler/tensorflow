@@ -43,10 +43,11 @@ def decode(config, input=None, output=None, max_sentences=0):
         token_ids.append(data_utils.EOS_ID)
       if len(token_ids) > max_input_length:
         max_input_length = len(token_ids)
-  bucket = model_utils.make_bucket(max_input_length, greedy_decoder=True)
   buckets = list(model_utils._buckets)
-  buckets.append(bucket)
-  logging.info("Add new bucket={}".format(bucket))
+  if max_input_length > buckets[-1][0]:
+    bucket = model_utils.make_bucket(max_input_length, greedy_decoder=True)
+    buckets.append(bucket)
+    logging.info("Add new bucket={}".format(bucket))
 
   with tf.Session() as session:
     # Create model and load parameters: uses the training graph for decoding

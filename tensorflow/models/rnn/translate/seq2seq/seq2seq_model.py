@@ -75,6 +75,7 @@ class Seq2SeqModel(object):
                max_to_keep=0,
                keep_prob=1.0,
                initializer=None,
+               single_src_embedding=True,
                legacy=False):
     """Create the model.
 
@@ -198,6 +199,7 @@ class Seq2SeqModel(object):
           init_const=init_const,
           bow_mask=self.bow_mask,
           keep_prob=keep_prob,
+          single_src_embedding=single_src_embedding,
           legacy=legacy)
 
     # Feeds for inputs.

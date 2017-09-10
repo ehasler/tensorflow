@@ -694,6 +694,7 @@ def attention_decoder(decoder_inputs,
           if src_mask is not None:
             s = s * src_mask
           a = nn_ops.softmax(s)
+
           # Now calculate the attention-weighted vector d.
           d = math_ops.reduce_sum(
               array_ops.reshape(a, [-1, attn_length, 1, 1]) * hidden, [1, 2])
@@ -707,7 +708,9 @@ def attention_decoder(decoder_inputs,
              for _ in xrange(num_heads)]
     for a in attns:  # Ensure the second shape of attention vectors is set.
       a.set_shape([None, attn_size])
+
     if initial_state_attention:
+      logging.info("Run attention on inital_state")
       attns = attention(initial_state)
 
     if maxout_layer:
@@ -732,11 +735,11 @@ def attention_decoder(decoder_inputs,
 
       # Run the attention mechanism.
       if i == 0 and initial_state_attention:
-        with variable_scope.variable_scope(variable_scope.get_variable_scope(),
-                                           reuse=True):
-          attns = attention(state) # calculate new attention masks (attention-weighted src vector)
+        with variable_scope.variable_scope(variable_scope.get_variable_scope(), reuse=True):
+          attns = attention(state)
       else:
-        attns = attention(state) # calculate new attention masks (attention-weighted src vector)
+        # calculate new attention masks (attention-weighted src vector)
+        attns = attention(state)
 
       if maxout_layer:
         # This tries to imitate the blocks Readout layer, consisting of Merge, Bias, Maxout, Linear, Linear
@@ -899,6 +902,7 @@ def embedding_attention_seq2seq(encoder_inputs,
                                 bow_mask=None,
                                 keep_prob=1.0,
                                 initializer=None,
+                                single_src_embedding=False,
                                 legacy=False):
   """Embedding sequence-to-sequence model with attention.
 
@@ -953,6 +957,11 @@ def embedding_attention_seq2seq(encoder_inputs,
       encoder_cell_fw = rnn_cell.EmbeddingWrapper(
         cell.get_fw_cell(), embedding_classes=num_encoder_symbols,
         embedding_size=embedding_size, initializer=initializer)
+      embed_scope = None
+      if single_src_embedding:
+        logging.info("Reuse forward src embedding for backward encoder")
+        with variable_scope.variable_scope("BiRNN/FW/EmbeddingWrapper") as es:
+          embed_scope = es
       encoder_cell_bw = rnn_cell.EmbeddingWrapper(
         cell.get_bw_cell(), embedding_classes=num_encoder_symbols,
         embedding_size=embedding_size, initializer=initializer)

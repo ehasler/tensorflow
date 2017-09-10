@@ -125,7 +125,7 @@ def create_model(session, config, forward_only, rename_variable_prefix=None, buc
     logging.info("Reading model parameters from %s" % model_path)
     model.saver.restore(session, model_path)
   else:
-    logging.info("Created model with fresh parameters.")
+    logging.info("Could not find model path '{}', created model with fresh parameters.".format(model_path))
     session.run(tf.global_variables_initializer())
   return model
 
@@ -162,6 +162,7 @@ def get_Seq2SeqModel(config, buckets, forward_only, rename_variable_prefix=None)
       keep_prob=config['keep_prob'],
       initializer=get_initializer(config),
       rename_variable_prefix=rename_variable_prefix,
+      single_src_embedding=config['single_src_embedding'],
       legacy=config['legacy'])
 
 def get_singlestep_Seq2SeqModel(config, buckets):
@@ -178,6 +179,7 @@ def get_singlestep_Seq2SeqModel(config, buckets):
       variable_prefix=config['variable_prefix'],
       init_const=config['bow_init_const'], use_bow_mask=config['use_bow_mask'],
       initializer=get_initializer(config),
+      single_src_embedding=config['single_src_embedding'],
       legacy=config['legacy'])
 
 def rename_variable_prefix(config):
@@ -232,7 +234,6 @@ def get_model_params(variable_prefix, split_lstm_matrices=True):
     tmp = { v.op.name: v.eval() for v in tf.global_variables() if v.op.name not in exclude }
   # Rename keys
   params = {name.replace("/", "-"): param for name, param in tmp.items()}
-  has_initializer = False
   if split_lstm_matrices:
     for name in params.keys():
       if "LSTMCell" in name:
@@ -258,14 +259,6 @@ def get_model_params(variable_prefix, split_lstm_matrices=True):
       elif "AttnW" in name:
         # remove dims of size 1
         params[name] = tf.squeeze(params[name]).eval()
-      elif name == "nmt-embedding_attention_seq2seq-Linear-Matrix":
-        has_initializer = True
-  if not has_initializer:
-    from tensorflow.python.framework import dtypes
-    m = array_ops.ones((1000, 1000), dtype=dtypes.float32)
-    b = array_ops.zeros(1000, dtype=dtypes.float32)
-    params["nmt-embedding_attention_seq2seq-Linear-Matrix"] = m.eval()
-    params["nmt-embedding_attention_seq2seq-Linear-Bias"] = b.eval()
   return params
 
 def get_npz_path(train_dir):

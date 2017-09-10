@@ -76,7 +76,8 @@ tf.app.flags.DEFINE_boolean("maxout_layer", False, "If > 0, use a maxout layer o
 tf.app.flags.DEFINE_string("encoder", "reverse", "Select encoder from 'reverse', 'bidirectional', 'bow'. The 'reverse' encoder is unidirectional and reverses the input "
                             "(default for tensorflow), the bidirectional encoder creates both forward and backward states and "
                             "concatenates them (like the Bahdanau model)")
-tf.app.flags.DEFINE_boolean("init_backward", False, "When using the bidirectional encoder, initialise the hidden decoder state from the backward encoder state (default: forward).")                            
+tf.app.flags.DEFINE_boolean("init_backward", False, "When using the bidirectional encoder, initialise the hidden decoder state from the backward encoder state (default: forward).")
+tf.app.flags.DEFINE_boolean("single_src_embedding", True, "Learn a single source embedding for both encoders")
 tf.app.flags.DEFINE_boolean("legacy", False, "Read legacy models with slightly different variable scopes")
 
 # Extra model configuration for BOW model

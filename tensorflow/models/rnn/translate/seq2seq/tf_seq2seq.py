@@ -53,10 +53,7 @@ class TFSeq2SeqEngine(Engine):
                  maxout_layer=False, init_backward=False, no_pad_symbol=False,
                  variable_prefix=None, init_const=False, use_bow_mask=False,
                  initializer=None,
-                 blocks_compat_mode=False,
-                 learn_state_transform=False,
                  single_src_embedding=False,
-                 compute_attn_first=False,
                  legacy=False):
         self.source_vocab_size = source_vocab_size
         self.target_vocab_size = target_vocab_size
