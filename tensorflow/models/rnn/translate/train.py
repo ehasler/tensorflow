@@ -48,6 +48,7 @@ tf.app.flags.DEFINE_integer("max_to_keep", 5, "Number of saved models to keep (s
 tf.app.flags.DEFINE_float("keep_prob", 1.0, "Probability of applying dropout to parameters")
 tf.app.flags.DEFINE_boolean("fixed_random_seed", False, "If True, use a fixed random seed to make training reproducible (affects matrix initialization)")
 tf.app.flags.DEFINE_float("init_scale", None, "Set the initial scale of the weights using tf.random_uniform_initializer")
+tf.app.flags.DEFINE_float("init_weight", None, "Use this weight to set the scale for tf.random_uniform_initializer")
 tf.app.flags.DEFINE_boolean("shuffle_data", True, "If False, do not shuffle the training data to make training reproducible")
 tf.app.flags.DEFINE_boolean("debug", True, "Add checks to make sure all examples in an epoch have been processed even if training was interrupted")
 tf.app.flags.DEFINE_boolean("self_test", False, "Run a self-test if this is set to True.")
@@ -61,6 +62,7 @@ tf.app.flags.DEFINE_boolean("eval_bleu", False, "If True, decode dev set and mea
 tf.app.flags.DEFINE_integer("eval_bleu_size", 0, "The number of dev sentences to translate (all if set to 0)")
 tf.app.flags.DEFINE_integer("eval_bleu_start", 10000, "Number of batches before starting BLEU evaluation on dev")
 tf.app.flags.DEFINE_string("multi_bleu_path", "../scripts/multi-bleu.perl", "Path to multi-bleu script")
+tf.app.flags.DEFINE_integer("bleu_improve_patience", 20, "The number of evaluations without BLEU gain on dev before we stop training")
 
 # Model configuration
 tf.app.flags.DEFINE_integer("src_vocab_size", 40000, "Source vocabulary size.")
@@ -128,6 +130,12 @@ def train(config):
     # Create model
     if config['fixed_random_seed']:
       tf.set_random_seed(1234)
+
+    if config['init_weight'] != None:
+      initializer = tf.random_uniform_initializer(-config['init_weight'], config['init_weight'], seed=None)
+      tf.get_variable_scope().set_initializer(initializer)
+      logging.info("Initialized variables using tf.get_variable_scope().set_initializer(initializer)")
+
     model = model_utils.create_model(session, config, forward_only=False)
 
     if config['save_npz']:
@@ -162,6 +170,7 @@ def train(config):
     previous_losses = [] # used for updating learning rate (train loss)
     current_eval_ppxs = [] # used for model saving
     current_bleu = -1 # used for model saving
+    num_evals_without_bleu_gain = 0
     current_batch_idx = None
     while True:
       current_batch_idx = model.global_step.eval() % num_train_batches
@@ -246,7 +255,13 @@ def train(config):
         if current_step % (config['steps_per_checkpoint'] * config['eval_frequency']) == 0:
           if config['eval_bleu']:
             if model.global_step.eval() >= config['eval_bleu_start']:
-              current_bleu = train_utils.decode_dev(config, model, current_bleu)
+              new_bleu = train_utils.decode_dev(config, model, current_bleu)
+              if (new_bleu == current_bleu):
+                num_evals_without_bleu_gain += 1
+              else:
+                num_evals_without_bleu_gain = 0
+              current_bleu = new_bleu
+              logging.info("Number of evaluations without BLEU gain = %i, BLEU improve patience = %i" % (num_evals_without_bleu_gain, config['bleu_improve_patience']))
             else:
               logging.info("Waiting until global step %i for BLEU evaluation on dev" % config['eval_bleu_start'])
           else:
@@ -255,7 +270,8 @@ def train(config):
       #endif save checkpoint
 
       if (config['max_train_batches'] > 0 and model.global_step.eval() >= config['max_train_batches']) or \
-        (config['max_train_epochs'] > 0 and epoch == config['max_train_epochs'] and current_batch_idx + 1 == num_train_batches):
+        (config['max_train_epochs'] > 0 and epoch == config['max_train_epochs'] and current_batch_idx + 1 == num_train_batches) or \
+        (num_evals_without_bleu_gain >= config['bleu_improve_patience']):
           if current_step % config['steps_per_checkpoint'] != 0:
             model_utils.save_model(session, config, model, epoch)
           logging.info("Stopped training after %i epochs" % epoch)
